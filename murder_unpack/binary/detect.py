@@ -40,6 +40,8 @@ class BinaryInfo:
     deployment: DeploymentType
     platform: Platform
     has_clr: bool = False
+    is_native_aot: bool = False
+    is_single_file_bundle: bool = False
     bundle_offset: int | None = None
     bundle_file_count: int | None = None
 
@@ -133,6 +135,9 @@ def detect_binary(path: Path | str) -> BinaryInfo:
     """Detect .NET deployment format of a game executable.
 
     Works with Windows PE (.exe), Linux ELF, and macOS Mach-O binaries.
+    A binary can be both NativeAOT AND a single-file bundle (NativeAOT
+    published as single-file), so both flags are set independently.
+    The primary deployment type reflects the most specific classification.
     """
     path = Path(path)
     data = path.read_bytes()
@@ -150,42 +155,35 @@ def detect_binary(path: Path | str) -> BinaryInfo:
     if exe_format == ExeFormat.PE:
         info.has_clr = _check_pe_clr(data)
 
-    # Check for single-file bundle (any platform)
+    # Check for NativeAOT markers (independent flag)
+    info.is_native_aot = _check_nativeaot(data)
+
+    # Check for single-file bundle (independent flag, any platform)
     sig_pos = _find_bundle_signature(data)
     if sig_pos is not None:
-        # Read manifest offset from 8 bytes before signature
         try:
             manifest_offset = struct.unpack_from("<Q", data, sig_pos - 8)[0]
             if 0 < manifest_offset < len(data):
+                info.is_single_file_bundle = True
                 info.bundle_offset = manifest_offset
-                info.deployment = DeploymentType.SINGLE_FILE
-                # Read file count from manifest
                 pos = manifest_offset
                 _major = struct.unpack_from("<I", data, pos)[0]
                 _minor = struct.unpack_from("<I", data, pos + 4)[0]
                 file_count = struct.unpack_from("<I", data, pos + 8)[0]
                 info.bundle_file_count = file_count
-                return info
         except (struct.error, IndexError):
             pass
 
-    # Check for NativeAOT
-    if _check_nativeaot(data):
+    # Determine primary deployment type
+    if info.is_native_aot:
         info.deployment = DeploymentType.NATIVE_AOT
-        return info
-
-    # Check for self-contained deployment
-    if _check_runtime_lib(path, platform):
+    elif info.is_single_file_bundle:
+        info.deployment = DeploymentType.SINGLE_FILE
+    elif _check_runtime_lib(path, platform):
         info.deployment = DeploymentType.SELF_CONTAINED
-        return info
-
-    # Check for framework-dependent
-    if _check_runtimeconfig(path):
+    elif _check_runtimeconfig(path):
         info.deployment = DeploymentType.FRAMEWORK_DEPENDENT
-        return info
-
-    # PE with CLR = managed (likely framework-dependent or self-contained without coreclr)
-    if info.has_clr:
+    elif info.has_clr:
         info.deployment = DeploymentType.FRAMEWORK_DEPENDENT
 
     return info

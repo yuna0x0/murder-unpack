@@ -10,7 +10,7 @@ import re
 from typing import Any
 
 # Regex matching Murder's FileHelper.Clean() — [^a-zA-Z0-9/\\_ -] stripped
-_CLEAN_RE = re.compile(r"[^a-zA-Z0-9/\\\_ -]")
+_CLEAN_RE = re.compile(r"[^a-zA-Z0-9/\\_ -]")
 
 
 def clean_editor_folder(folder: str) -> str:

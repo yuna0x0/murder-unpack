@@ -154,25 +154,29 @@ def _detect_game_name(game_config: dict[str, Any]) -> str:
 
 
 def _copy_resources(game_dir: Path, resources_dir: Path) -> None:
-    """Copy all resource directories and standalone files from game export."""
-    src_resources = game_dir / "resources"
+    """Copy all resource directories and standalone files from game export.
 
-    # Copy directories
-    dirs_to_copy = ["atlas", "fonts", "shaders", "sounds", "images", "video", "fmod"]
-    for dirname in dirs_to_copy:
-        src = src_resources / dirname
-        if src.exists():
-            dst = resources_dir / dirname
+    Copies all subdirectories (atlas, fonts, shaders, sounds, images, video,
+    fmod, etc.) and all standalone files (icons, manifests, etc.) from the
+    game's resources/ directory. Skips content/ (handled separately as packed
+    data) and game_config (handled separately with type remapping).
+    """
+    src_resources = game_dir / "resources"
+    skip_dirs = {"content"}  # Packed data handled separately
+    skip_files = {"game_config"}  # Handled separately with type remapping
+
+    # Copy all subdirectories
+    for item in sorted(src_resources.iterdir()):
+        if item.is_dir() and item.name not in skip_dirs:
+            dst = resources_dir / item.name
             if dst.exists():
                 shutil.rmtree(dst)
-            shutil.copytree(src, dst)
+            shutil.copytree(item, dst)
 
-    # Copy standalone resource files (icon, etc.)
-    standalone_files = ["icon.icns", "icon.ico", "icon.png"]
-    for filename in standalone_files:
-        src = src_resources / filename
-        if src.exists():
-            shutil.copy2(src, resources_dir / filename)
+    # Copy all standalone files at resources/ root
+    for item in sorted(src_resources.iterdir()):
+        if item.is_file() and item.name not in skip_files:
+            shutil.copy2(item, resources_dir / item.name)
 
 
 def _export_gum_scripts(db: GameDatabase, output_dir: Path) -> int:

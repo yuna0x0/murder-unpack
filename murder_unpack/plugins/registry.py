@@ -24,10 +24,11 @@ ENTRY_POINT_GROUPS = {
     "hooks": "murder_unpack.hooks",
 }
 
-DEFAULT_PLUGIN_DIRS = [
-    Path.home() / ".murder-unpack" / "plugins",
-    Path.cwd() / "plugins",
-]
+def _default_plugin_dirs() -> list[Path]:
+    return [
+        Path.home() / ".murder-unpack" / "plugins",
+        Path.cwd() / "plugins",
+    ]
 
 
 class PluginRegistry:
@@ -47,7 +48,7 @@ class PluginRegistry:
 
     def discover_all(self, plugin_dirs: list[Path] | None = None) -> None:
         """Load plugins from both drop-in directories and entry points."""
-        dirs = plugin_dirs or DEFAULT_PLUGIN_DIRS
+        dirs = plugin_dirs or _default_plugin_dirs()
 
         # 1. Directory-based (drop-in .py files)
         for d in dirs:
@@ -128,4 +129,4 @@ class PluginRegistry:
 
     def plugin_dirs(self) -> list[Path]:
         """Return the plugin directories being searched."""
-        return DEFAULT_PLUGIN_DIRS
+        return _default_plugin_dirs()

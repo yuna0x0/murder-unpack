@@ -232,8 +232,12 @@ def analyze_binary(
     click.echo(f"Format: {info.exe_format.value}")
     click.echo(f"Platform: {info.platform.value}")
     click.echo(f"Deployment: {info.deployment.value}")
+    click.echo(f"NativeAOT: {info.is_native_aot}")
+    click.echo(f"Single-file bundle: {info.is_single_file_bundle}")
     if info.bundle_file_count is not None:
         click.echo(f"Bundle files: {info.bundle_file_count}")
+    if info.has_clr:
+        click.echo(f"CLR header: {info.has_clr}")
 
     # Extract type names from NativeAOT binary
     from murder_unpack.binary.native_strings import extract_type_names
