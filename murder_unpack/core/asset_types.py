@@ -38,6 +38,7 @@ _TYPE_MAP: dict[str, tuple[str, str]] = {
     "Murder.Assets.Sounds.SpeakerEventsAsset": ("data", "Sounds/Speakers"),
     "Murder.Assets.WorldEventsAsset": ("data", "Global Events"),
     "Murder.Assets.Graphics.TextIconsAsset": ("data", "Story"),
+    "Murder.Assets.TextIconsAsset": ("data", "Story"),
     "Murder.Assets.Input.InputProfileAsset": ("data", ""),
     "Murder.Assets.Input.InputGraphicsAsset": ("data", "Ui"),
     "Murder.Assets.Dialogs.SpeakerAsset": ("data", "Story/Speakers"),

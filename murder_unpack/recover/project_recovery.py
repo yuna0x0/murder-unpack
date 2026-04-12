@@ -3,6 +3,14 @@
 Reverses the Murder Engine export process: unpacks .gz data files,
 splits assets into individual .json files, creates a C# project scaffold,
 and optionally clones the engine at a specific version.
+
+Recovery includes:
+- Individual .json asset files in correct editor directories
+- .gum dialogue scripts reconstructed from compiled CharacterAsset data
+- Localization CSV files for each language
+- All resource directories (atlas, fonts, shaders, sounds, images, video, fmod)
+- C# project scaffold (.sln, .csproj, Program.cs)
+- Auto-generated C# stubs for game-specific types
 """
 
 from __future__ import annotations
@@ -87,15 +95,15 @@ def recover_project(
     src_config = game_dir / "resources" / "game_config"
     if src_config.exists():
         config = load_json(src_config)
-        # Optionally remap RoadGameProfile → GameProfile for editor compat
+        # Optionally remap RoadGameProfile -> GameProfile for editor compat
         if config.get("$type") == "Road.Assets.RoadGameProfile":
             config["$type"] = "Murder.Assets.GameProfile"
         save_json(config, resources_dir / "game_config")
         click.echo("  Copied game_config (remapped $type for editor compatibility)")
 
-    # Step 7: Copy resource directories (atlas, fonts, shaders, sounds, images, video)
+    # Step 7: Copy ALL resource directories
     click.echo("Copying resource files...")
-    _copy_resource_dirs(game_dir, resources_dir)
+    _copy_resources(game_dir, resources_dir)
 
     # Step 8: Copy packed data (for game runtime)
     packed_dir = game_src_dir / "packed" / "content"
@@ -121,8 +129,17 @@ def recover_project(
         stub_count = generate_stubs(db, stubs_dir)
         click.echo(f"  Generated {stub_count} stub classes")
 
-    # Step 11: Create empty resources dir for raw assets
-    (output_dir / "resources").mkdir(exist_ok=True)
+    # Step 11: Reconstruct .gum dialogue scripts
+    click.echo("Reconstructing .gum dialogue scripts...")
+    raw_resources_dir = output_dir / "resources"
+    raw_resources_dir.mkdir(exist_ok=True)
+    gum_count = _export_gum_scripts(db, raw_resources_dir / "dialogues")
+    click.echo(f"  Reconstructed {gum_count} .gum scripts")
+
+    # Step 12: Export localization CSV files
+    click.echo("Exporting localization CSV files...")
+    loc_count = _export_localization_csv(db, raw_resources_dir / "loc")
+    click.echo(f"  Exported {loc_count} localization CSV files")
 
     click.echo(f"\nRecovery complete! Project at: {output_dir}")
     click.echo(f"  To open in editor: cd {output_dir}/src/{game_name}.Editor && dotnet run")
@@ -133,15 +150,15 @@ def _detect_game_name(game_config: dict[str, Any]) -> str:
     name = game_config.get("Name", "")
     if name and name != "Game Profile":
         return name.replace(" ", "")
-    # Fallback
     return "RecoveredGame"
 
 
-def _copy_resource_dirs(game_dir: Path, resources_dir: Path) -> None:
-    """Copy atlas, fonts, shaders, sounds, images, video from game export."""
-    dirs_to_copy = ["atlas", "fonts", "shaders", "sounds", "images", "video"]
+def _copy_resources(game_dir: Path, resources_dir: Path) -> None:
+    """Copy all resource directories and standalone files from game export."""
     src_resources = game_dir / "resources"
 
+    # Copy directories
+    dirs_to_copy = ["atlas", "fonts", "shaders", "sounds", "images", "video", "fmod"]
     for dirname in dirs_to_copy:
         src = src_resources / dirname
         if src.exists():
@@ -149,3 +166,113 @@ def _copy_resource_dirs(game_dir: Path, resources_dir: Path) -> None:
             if dst.exists():
                 shutil.rmtree(dst)
             shutil.copytree(src, dst)
+
+    # Copy standalone resource files (icon, etc.)
+    standalone_files = ["icon.icns", "icon.ico", "icon.png"]
+    for filename in standalone_files:
+        src = src_resources / filename
+        if src.exists():
+            shutil.copy2(src, resources_dir / filename)
+
+
+def _export_gum_scripts(db: GameDatabase, output_dir: Path) -> int:
+    """Reconstruct .gum dialogue scripts from CharacterAsset data."""
+    from murder_unpack.extract.dialogue_extractor import LocalizationLookup
+    from murder_unpack.extract.gum_exporter import GumExporter
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    lookup = LocalizationLookup(db)
+    exporter = GumExporter(lookup)
+    characters = db.get_by_type("Murder.Assets.CharacterAsset")
+    count = 0
+
+    for char in characters:
+        name = char.get("Name", f"unknown_{count}")
+        safe_name = "".join(c if c.isalnum() or c in " _-" else "_" for c in name)
+        out_path = output_dir / f"{safe_name}.gum"
+        script = exporter.export_character(char)
+        out_path.write_text(script, encoding="utf-8")
+        count += 1
+
+    return count
+
+
+def _export_localization_csv(db: GameDatabase, output_dir: Path) -> int:
+    """Export localization assets as CSV files matching Murder's editor format.
+
+    Murder's editor exports localization as CSV with columns:
+    Guid, Speaker, Original, Translated, Notes
+
+    Dialogue resources are grouped by CharacterAsset name.
+    """
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Build speaker name lookup
+    speaker_names: dict[str, str] = {}
+    for s in db.get_by_type("Road.Assets.RoadSpeakerAsset"):
+        speaker_names[s.get("Guid", "")] = s.get("Name", "")
+    for s in db.get_by_type("Murder.Assets.Dialogs.SpeakerAsset"):
+        speaker_names[s.get("Guid", "")] = s.get("Name", "")
+
+    # Build CharacterAsset name lookup
+    char_names: dict[str, str] = {}
+    for c in db.get_by_type("Murder.Assets.CharacterAsset"):
+        char_names[c.get("Guid", "")] = c.get("Name", "")
+
+    locs = db.get_by_type("Murder.Assets.Localization.LocalizationAsset")
+    count = 0
+
+    for loc in locs:
+        name = loc.get("Name", f"loc_{count}")
+        safe_name = "".join(c if c.isalnum() or c in " _-" else "_" for c in name)
+        out_path = output_dir / f"{safe_name}.csv"
+
+        lines: list[str] = []
+        # CSV header
+        lines.append("Guid,Speaker,Original,Translated,Notes")
+
+        # Regular resources
+        resources = loc.get("resources", [])
+        for entry in resources:
+            guid = entry.get("Guid", "")
+            text = entry.get("String", "")
+            notes = entry.get("Notes", "")
+            is_generated = entry.get("IsGenerated", False)
+            # Escape CSV fields
+            text_csv = _csv_escape(text)
+            notes_csv = _csv_escape(notes)
+            lines.append(f"{guid},,{text_csv},{text_csv},{notes_csv}")
+
+        # Dialogue resources (grouped by CharacterAsset)
+        dialogue_resources = loc.get("dialogueResources", [])
+        for dlg_group in dialogue_resources:
+            dlg_guid = dlg_group.get("DialogueResourceGuid", "")
+            char_name = char_names.get(dlg_guid, dlg_guid[:8])
+            lines.append(f"# {char_name}")
+
+            for data_res in dlg_group.get("DataResources", []):
+                guid = data_res.get("Guid", "")
+                speaker_guid = data_res.get("Speaker", "")
+                speaker_name = speaker_names.get(speaker_guid, speaker_guid[:8] if speaker_guid else "")
+                # Look up the actual text from resources
+                text = ""
+                for r in resources:
+                    if r.get("Guid") == guid:
+                        text = r.get("String", "")
+                        break
+                text_csv = _csv_escape(text)
+                lines.append(f"{guid},{_csv_escape(speaker_name)},{text_csv},{text_csv},")
+
+        out_path.write_text("\n".join(lines), encoding="utf-8")
+        count += 1
+
+    return count
+
+
+def _csv_escape(value: str) -> str:
+    """Escape a value for CSV output."""
+    if not value:
+        return ""
+    if "," in value or '"' in value or "\n" in value:
+        return '"' + value.replace('"', '""') + '"'
+    return value
