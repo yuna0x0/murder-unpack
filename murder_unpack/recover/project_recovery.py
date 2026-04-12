@@ -24,7 +24,7 @@ import click
 from murder_unpack.core.gzip_json import load_json, save_json
 from murder_unpack.extract.game_data import GameDatabase
 from murder_unpack.recover.asset_splitter import split_assets
-from murder_unpack.recover.engine_manager import clone_engine
+from murder_unpack.recover.engine_manager import clone_engine, detect_engine_version
 from murder_unpack.recover.scaffold import generate_editor_config, generate_solution
 from murder_unpack.recover.stub_generator import generate_stubs
 
@@ -33,7 +33,7 @@ def recover_project(
     game_dir: Path | str,
     output_dir: Path | str,
     game_name: str | None = None,
-    engine_version: str = "main",
+    engine_version: str | None = None,
     engine_path: Path | str | None = None,
     skip_engine: bool = False,
     generate_stubs_flag: bool = True,
@@ -63,6 +63,13 @@ def recover_project(
     if game_name is None:
         game_name = _detect_game_name(db.game_config)
     click.echo(f"  Project name: {game_name}")
+
+    # Auto-detect engine version from game_config if not specified
+    if engine_version is None and not skip_engine and engine_path is None:
+        engine_version = detect_engine_version(db.game_config)
+        click.echo(f"  Auto-detected engine version: {engine_version}")
+    elif engine_version is None:
+        engine_version = "main"
 
     # Step 2: Clone or link engine
     if not skip_engine:

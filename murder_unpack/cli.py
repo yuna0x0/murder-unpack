@@ -39,8 +39,12 @@ def info(game_dir: Path) -> None:
     db = GameDatabase()
     db.load(game_dir)
 
+    from murder_unpack.recover.engine_manager import detect_engine_version
+
     config = db.game_config
+    detected_version = detect_engine_version(config)
     click.echo(f"Game Config Type: {config.get('$type', 'N/A')}")
+    click.echo(f"Engine Version: {detected_version} (detected)")
     click.echo(f"Start Scene: {config.get('StartingScene', 'N/A')}")
     click.echo(f"Target FPS: {config.get('TargetFps', 'N/A')}")
     click.echo(f"Grid Size: {config.get('DefaultGridCellSize', 'N/A')}")
@@ -185,7 +189,7 @@ def decode_qoi(input_path: Path, output_path: Path) -> None:
 @main.command()
 @click.argument("game_dir", type=click.Path(exists=True, path_type=Path))
 @click.argument("output_dir", type=click.Path(path_type=Path))
-@click.option("--engine-version", default="main", help="Engine branch/tag/commit")
+@click.option("--engine-version", default=None, help="Engine branch/tag/commit (auto-detected if omitted)")
 @click.option("--engine-path", type=click.Path(path_type=Path), default=None, help="Use existing engine clone")
 @click.option("--skip-engine", is_flag=True, help="Don't clone engine")
 @click.option("--game-name", default=None, help="Project name")
