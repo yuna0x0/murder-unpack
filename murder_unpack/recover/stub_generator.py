@@ -17,7 +17,7 @@ from murder_unpack.extract.game_data import GameDatabase
 _GUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.I)
 
 # Common base GameAsset fields to exclude from stubs
-_BASE_ASSET_FIELDS = {"$type", "Name", "Guid", "scalingFilter"}
+_BASE_ASSET_FIELDS = {"$type", "Name", "Guid"}
 
 
 def infer_csharp_type(value: Any) -> str:

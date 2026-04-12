@@ -105,15 +105,26 @@ def extract_sprites(game_dir: Path, output_dir: Path, atlas: str | None, no_untr
 @main.command("extract-dialogue")
 @click.argument("game_dir", type=click.Path(exists=True, path_type=Path))
 @click.argument("output_dir", type=click.Path(path_type=Path))
-def extract_dialogue(game_dir: Path, output_dir: Path) -> None:
-    """Export all dialogue scripts to readable markdown."""
-    from murder_unpack.extract.dialogue_extractor import extract_dialogues
+@click.option("--format", "fmt", type=click.Choice(["gum", "markdown", "both"]), default="both",
+              help="Output format: gum (Murder's script format), markdown, or both")
+def extract_dialogue(game_dir: Path, output_dir: Path, fmt: str) -> None:
+    """Export all dialogue scripts (default: both .gum and .md formats)."""
     from murder_unpack.extract.game_data import GameDatabase
 
     db = GameDatabase()
     db.load(game_dir)
-    count = extract_dialogues(db, output_dir)
-    click.echo(f"Exported {count} character dialogues to {output_dir}")
+
+    if fmt in ("gum", "both"):
+        from murder_unpack.extract.gum_exporter import export_dialogues_gum
+        gum_dir = output_dir / "gum" if fmt == "both" else output_dir
+        count = export_dialogues_gum(db, gum_dir)
+        click.echo(f"Exported {count} .gum scripts to {gum_dir}")
+
+    if fmt in ("markdown", "both"):
+        from murder_unpack.extract.dialogue_extractor import extract_dialogues
+        md_dir = output_dir / "markdown" if fmt == "both" else output_dir
+        count = extract_dialogues(db, md_dir)
+        click.echo(f"Exported {count} markdown dialogues to {md_dir}")
 
 
 # ─── list-assets ─────────────────────────────────────────────────────────────
