@@ -6,14 +6,16 @@ Reverse-engineers exported Murder Engine games back into editor-openable project
 
 ## Features
 
-- **Full project recovery** — Reconstructs a Murder Engine editor project from an exported game
+- **Project recovery** — Reconstruct a Murder Engine editor project from an exported game, with auto-detected engine version
 - **Asset extraction** — Unpack all `.gz` data files into individual JSON assets
 - **Sprite extraction** — Extract individual sprites from texture atlas sheets as PNG
 - **Dialogue export** — Reconstruct `.gum` scripts (Murder's dialogue format) and export to markdown
+- **Localization export** — Export localization CSV files matching Murder's editor format
+- **Engine version detection** — Auto-detect engine version from game_config field fingerprinting
 - **Binary analysis** — Detect .NET deployment format (NativeAOT, single-file bundle, self-contained)
 - **Bundle extraction** — Extract managed assemblies from .NET single-file bundles
 - **C# stub generation** — Auto-generate typed C# classes from packed JSON data
-- **Engine management** — Clone any Murder Engine version (branch/tag/commit)
+- **Engine management** — Clone any Murder Engine version (branch/tag/commit) with submodules
 - **Repacking** — Repack modified assets back into the game's `.gz` format
 - **Plugin system** — Extend with drop-in `.py` files or pip-installable packages
 - **Cross-platform** — Works on Windows, Linux, and macOS; handles all three platforms' binaries
@@ -25,6 +27,7 @@ Reverse-engineers exported Murder Engine games back into editor-openable project
 - Python 3.11+
 - [uv](https://docs.astral.sh/uv/) (recommended) or pip
 - Git (for engine cloning)
+- .NET 8 SDK (for building recovered projects)
 
 ### Install
 
@@ -41,17 +44,17 @@ uv sync
 ### Basic Usage
 
 ```bash
-# Show game info and asset counts
+# Show game info, asset counts, and detected engine version
 murder-unpack info "path/to/game"
 
-# Extract all data, sprites, and dialogues
+# Extract all data, sprites, dialogues, and localization
 murder-unpack extract-all "path/to/game" output/
 
 # List all assets (with optional filters)
 murder-unpack list-assets "path/to/game" --type WorldAsset
 
-# Recover into a full editor project
-murder-unpack recover "path/to/game" recovered/ --engine-version main
+# Recover into a full editor project (engine version auto-detected)
+murder-unpack recover "path/to/game" recovered/
 ```
 
 ## Commands
@@ -60,8 +63,8 @@ murder-unpack recover "path/to/game" recovered/ --engine-version main
 
 | Command | Description |
 |---------|-------------|
-| `info <game_dir>` | Show game info, asset counts, and atlas list |
-| `extract-all <game_dir> <output_dir>` | Full extraction: data, sprites, dialogues, and localization |
+| `info <game_dir>` | Show game info, asset counts, detected engine version |
+| `extract-all <game_dir> <output_dir>` | Full extraction: data, sprites, dialogues (.gum + markdown), localization |
 | `extract-data <game_dir> <output_dir>` | Dump all `.gz` data files as plain JSON |
 | `extract-sprites <game_dir> <output_dir>` | Extract sprites from atlas sheets as PNG |
 | `extract-dialogue <game_dir> <output_dir>` | Export dialogues as `.gum` scripts, markdown, or both |
@@ -80,12 +83,14 @@ murder-unpack recover "path/to/game" recovered/ --engine-version main
 
 ```bash
 murder-unpack recover "path/to/game" recovered/ \
-    --engine-version rel/11.0 \    # Branch, tag, or commit hash
+    --engine-version rel/11.0 \    # Override auto-detected version
     --game-name MyGame \           # Project name (auto-detected if omitted)
-    --skip-engine \                # Don't clone engine (link manually)
-    --engine-path /path/to/murder  # Use existing engine clone
+    --skip-engine \                # Don't clone engine
+    --engine-path /path/to/murder  # Use existing engine (copies to project)
     --no-stubs                     # Skip C# stub generation
 ```
+
+When `--engine-version` is omitted, the tool auto-detects the correct version by fingerprinting the `game_config` fields (supports rel/3.6 through rel/11.0+).
 
 ### Binary Analysis
 
@@ -124,14 +129,28 @@ Murder Engine exports games as GZip-compressed JSON:
 
 ### Recovery Process
 
-1. **Load** — Decompress all `.gz` files, parse JSON, index 5000+ assets
-2. **Split** — Write each asset as an individual `.json` file in the correct editor directory
-3. **Scaffold** — Generate `.sln`, `.csproj`, `Program.cs` matching the [hellomurder](https://github.com/isadorasophia/hellomurder) template
-4. **Resources** — Copy atlas, fonts, shaders, sounds, images, video, FMOD libs, icons
-5. **Dialogues** — Reconstruct `.gum` dialogue scripts from compiled CharacterAsset data
-6. **Localization** — Export localization CSV files for each language (matching editor format)
-7. **Stubs** — Auto-generate C# stub classes for game-specific types (e.g., `Road.Assets.*`)
-8. **Engine** — Clone Murder Engine at the specified version with submodules
+1. **Detect** — Auto-detect engine version from game_config field fingerprint
+2. **Load** — Decompress all `.gz` files, parse JSON, index assets
+3. **Split** — Write each asset as an individual `.json` file in the correct editor directory
+4. **Scaffold** — Generate `.sln`, `.csproj`, `Program.cs` matching the [hellomurder](https://github.com/isadorasophia/hellomurder) template
+5. **Resources** — Copy all resource files and directories (atlas, fonts, shaders, sounds, images, video, FMOD, icons)
+6. **Dialogues** — Reconstruct `.gum` dialogue scripts from compiled CharacterAsset data
+7. **Localization** — Export localization CSV files for each language (matching editor format)
+8. **Stubs** — Auto-generate C# stub classes for game-specific types
+9. **Engine** — Clone Murder Engine at the detected (or specified) version with submodules
+
+### Engine Version Detection
+
+The tool fingerprints `game_config` fields to detect the engine version:
+
+| Fields Present | Detected Version |
+|---|---|
+| `VideoPath`, `DefaultPalette` | rel/11.0+ |
+| `PreloadTextures` (no `VideoPath`) | rel/8.0-10.0 |
+| `FeedbackUrl` | rel/7.0 |
+| `EnforceResolution` + `LocalizationPath` | rel/5.0 |
+| `EnforceResolution` | rel/4.0 |
+| `Fullscreen` | rel/3.6 |
 
 ### Binary Detection
 

@@ -2,15 +2,17 @@
 
 Reverses the Murder Engine export process: unpacks .gz data files,
 splits assets into individual .json files, creates a C# project scaffold,
-and optionally clones the engine at a specific version.
+and clones the engine at the auto-detected (or specified) version.
 
 Recovery includes:
+- Auto-detected engine version from game_config field fingerprint
 - Individual .json asset files in correct editor directories
 - .gum dialogue scripts reconstructed from compiled CharacterAsset data
 - Localization CSV files for each language
-- All resource directories (atlas, fonts, shaders, sounds, images, video, fmod)
-- C# project scaffold (.sln, .csproj, Program.cs)
+- All resource files and directories (atlas, fonts, shaders, sounds, images, video, fmod, icons)
+- C# project scaffold (.sln, .csproj, Program.cs) matching hellomurder template
 - Auto-generated C# stubs for game-specific types
+- editor_config auto-created by Murder editor on first run
 """
 
 from __future__ import annotations
@@ -25,7 +27,7 @@ from murder_unpack.core.gzip_json import load_json, save_json
 from murder_unpack.extract.game_data import GameDatabase
 from murder_unpack.recover.asset_splitter import split_assets
 from murder_unpack.recover.engine_manager import clone_engine, detect_engine_version
-from murder_unpack.recover.scaffold import generate_editor_config, generate_solution
+from murder_unpack.recover.scaffold import generate_solution
 from murder_unpack.recover.stub_generator import generate_stubs
 
 

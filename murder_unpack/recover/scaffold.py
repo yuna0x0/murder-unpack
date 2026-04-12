@@ -1,10 +1,14 @@
-"""Generate C# project scaffold for Murder Engine editor projects."""
+"""Generate C# project scaffold for Murder Engine editor projects.
+
+Generates .sln, .csproj, Program.cs, and game class files matching the
+hellomurder template (https://github.com/isadorasophia/hellomurder).
+The game .csproj includes resource copy directives, source generator
+references (Bang.Generator, Murder.Serializer), and trimmer configuration.
+"""
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
-from typing import Any
 
 # Murder engine .csproj relative paths (from project root)
 MURDER_CSPROJ = "murder/src/Murder/Murder.csproj"
@@ -203,27 +207,3 @@ public class {game_name}ComponentsLookup : ComponentsLookup
 }}
 """
     (game_dir / f"{game_name}Game.cs").write_text(content, encoding="utf-8")
-
-
-def generate_editor_config(
-    output_path: Path,
-    game_source_path: str,
-) -> None:
-    """Generate editor_config JSON with sensible defaults."""
-    config = {
-        "Name": "Editor Settings",
-        "BinResourcesPath": "resources",
-        "GameSourcePath": game_source_path,
-        "StartMaximized": False,
-        "WindowStartPosition": {"X": -1, "Y": -1},
-        "WindowSize": {"X": 1280, "Y": 720},
-        "AlwaysBuildAtlasOnStartup": False,
-        "SaveAsepriteInfoOnSpriteAsset": False,
-        "CheckForPackedAssetsIntegrity": False,
-        "FontScale": 1.0,
-        "WasdCameraSpeed": 100.0,
-        "DpiScale": 1.0,
-    }
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    json_str = json.dumps(config, indent=2, ensure_ascii=False)
-    output_path.write_text(json_str.replace("\n", "\r\n"), encoding="utf-8", newline="")
