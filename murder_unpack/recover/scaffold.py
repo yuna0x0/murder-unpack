@@ -60,6 +60,7 @@ def _write_game_csproj(project_dir: Path, game_name: str) -> None:
     # Relative paths from src/GameName/ to project root
     murder_ref = f"../../{MURDER_CSPROJ}"
     bang_ref = f"../../{BANG_GENERATOR_CSPROJ}"
+    bang_analyzers_ref = "../../murder/bang/src/Bang.Analyzers/Bang.Analyzers.csproj"
     serializer_ref = f"../../{MURDER_SERIALIZER_CSPROJ}"
 
     content = f"""\
@@ -69,12 +70,40 @@ def _write_game_csproj(project_dir: Path, game_name: str) -> None:
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <PublishAot>true</PublishAot>
+    <IsTrimmable>false</IsTrimmable>
+    <JsonSerializerIsReflectionEnabledByDefault>false</JsonSerializerIsReflectionEnabledByDefault>
+    <ErrorOnDuplicatePublishOutputFiles>false</ErrorOnDuplicatePublishOutputFiles>
+    <GeneratorParentAssembly>Murder</GeneratorParentAssembly>
   </PropertyGroup>
+
+  <!-- Copy resources and packed data to build output -->
+  <ItemGroup>
+    <Content Include="resources\\**" CopyToOutputDirectory="PreserveNewest" LinkBase="resources" />
+    <Content Include="packed\\**" CopyToOutputDirectory="PreserveNewest" TargetPath="resources\\%(RecursiveDir)\\%(Filename)%(Extension)" />
+  </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="{murder_ref}" />
-    <ProjectReference Include="{bang_ref}" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
-    <ProjectReference Include="{serializer_ref}" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+    <ProjectReference Condition="'$(Configuration)' == 'Debug'" Include="{bang_analyzers_ref}">
+      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+      <OutputItemType>Analyzer</OutputItemType>
+    </ProjectReference>
+    <ProjectReference Include="{bang_ref}">
+      <ReferenceOutputAssembly>true</ReferenceOutputAssembly>
+      <OutputItemType>Analyzer</OutputItemType>
+    </ProjectReference>
+    <CompilerVisibleProperty Include="GeneratorParentAssembly" />
+    <ProjectReference Include="{serializer_ref}">
+      <ReferenceOutputAssembly>true</ReferenceOutputAssembly>
+      <OutputItemType>Analyzer</OutputItemType>
+    </ProjectReference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <TrimmerRootAssembly Include="Bang" />
+    <TrimmerRootAssembly Include="Murder" />
+    <TrimmerRootAssembly Include="MonoGame.Framework" />
+    <TrimmerRootAssembly Include="{game_name}" />
   </ItemGroup>
 </Project>
 """
@@ -87,8 +116,6 @@ def _write_editor_csproj(project_dir: Path, game_name: str) -> None:
 
     murder_editor_ref = f"../../{MURDER_EDITOR_CSPROJ}"
     game_ref = f"../{game_name}/{game_name}.csproj"
-    bang_ref = f"../../{BANG_GENERATOR_CSPROJ}"
-    serializer_ref = f"../../{MURDER_SERIALIZER_CSPROJ}"
 
     content = f"""\
 <Project Sdk="Microsoft.NET.Sdk">
@@ -97,14 +124,14 @@ def _write_editor_csproj(project_dir: Path, game_name: str) -> None:
     <TargetFramework>net8.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <PublishReadyToRun>false</PublishReadyToRun>
+    <TieredCompilation>false</TieredCompilation>
     <DefineConstants>$(DefineConstants);EDITOR</DefineConstants>
   </PropertyGroup>
 
   <ItemGroup>
     <ProjectReference Include="{murder_editor_ref}" />
     <ProjectReference Include="{game_ref}" />
-    <ProjectReference Include="{bang_ref}" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
-    <ProjectReference Include="{serializer_ref}" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
   </ItemGroup>
 </Project>
 """
