@@ -148,13 +148,31 @@ public class {game_name}Architect : {game_name}Game, IMurderArchitect
 def _write_game_class(project_dir: Path, game_name: str) -> None:
     game_dir = project_dir / "src" / game_name
     content = f"""\
+using Bang;
 using Murder;
+using Murder.Serialization;
+using System.Text.Json;
 
 namespace {game_name};
 
 public class {game_name}Game : IMurderGame
 {{
     public string Name => "{game_name}";
+
+    public JsonSerializerOptions Options => MurderSerializerOptionsExtensions.Options;
+
+    public ComponentsLookup ComponentsLookup => new {game_name}ComponentsLookup();
+
+    public int GetDefaultFont() => 0;
+}}
+
+/// <summary>
+/// Minimal components lookup stub.
+/// The Bang.Generator source generator will create the real implementation
+/// with proper component type mappings when custom components are defined.
+/// </summary>
+public class {game_name}ComponentsLookup : ComponentsLookup
+{{
 }}
 """
     (game_dir / f"{game_name}Game.cs").write_text(content, encoding="utf-8")

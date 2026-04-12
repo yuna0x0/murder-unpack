@@ -67,10 +67,15 @@ def recover_project(
     # Step 2: Clone or link engine
     if not skip_engine:
         if engine_path:
-            click.echo(f"Using existing engine at {engine_path}")
+            click.echo(f"Copying engine from {engine_path}...")
             dest = output_dir / "murder"
             if not dest.exists():
-                dest.symlink_to(Path(engine_path).resolve())
+                # Copy instead of symlink — dotnet resolves relative paths
+                # from symlink target, breaking Bang/Gum submodule references
+                shutil.copytree(
+                    Path(engine_path).resolve(), dest,
+                    symlinks=True, dirs_exist_ok=False,
+                )
         else:
             click.echo(f"Cloning Murder engine ({engine_version})...")
             clone_engine(output_dir, engine_version)

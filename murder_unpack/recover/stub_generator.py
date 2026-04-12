@@ -53,16 +53,35 @@ def infer_csharp_type(value: Any) -> str:
         if keys == {"R", "G", "B", "A"}:
             return "Color"
         if keys == {"Data1", "Data2", "Data3", "Data4", "Path"}:
-            return "FmodId"
+            return "SoundEventId"
         if "$type" in value:
-            # Nested typed object — use the type name
-            return _short_type_name(value["$type"])
+            # Nested typed object — only use Murder engine types that are
+            # guaranteed to exist. Game-specific types and generics use object.
+            type_name = value["$type"]
+            if "<" in type_name:
+                return "object"
+            if not type_name.startswith("Murder."):
+                return "object"
+            return _short_type_name(type_name)
         return "object"
     return "object"
 
 
 def _short_type_name(full_type: str) -> str:
-    """Convert full type name to short name."""
+    """Convert full C# type name to a safe short name.
+
+    Handles generic types like:
+      Bang.Interactions.InteractiveComponent<Road.Interactions.Foo>
+      → InteractiveComponent_Foo
+    """
+    # Strip generic type arguments first, flatten to safe identifier
+    if "<" in full_type:
+        # Extract outer type and inner type(s)
+        base, rest = full_type.split("<", 1)
+        inner = rest.rstrip(">")
+        base_short = base.rsplit(".", 1)[-1]
+        inner_short = inner.rsplit(".", 1)[-1]
+        return f"{base_short}_{inner_short}"
     return full_type.rsplit(".", 1)[-1]
 
 
@@ -151,6 +170,7 @@ def generate_stubs(
             "using Bang;",
             "using Murder.Assets;",
             "using Murder.Core.Geometry;",
+            "using Murder.Core.Sounds;",
             "using System.Collections.Immutable;",
             "using System.Numerics;",
             "",
