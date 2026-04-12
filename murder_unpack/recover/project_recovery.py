@@ -177,24 +177,8 @@ def _copy_resources(game_dir: Path, resources_dir: Path) -> None:
 
 def _export_gum_scripts(db: GameDatabase, output_dir: Path) -> int:
     """Reconstruct .gum dialogue scripts from CharacterAsset data."""
-    from murder_unpack.extract.dialogue_extractor import LocalizationLookup
-    from murder_unpack.extract.gum_exporter import GumExporter
-
-    output_dir.mkdir(parents=True, exist_ok=True)
-    lookup = LocalizationLookup(db)
-    exporter = GumExporter(lookup)
-    characters = db.get_by_type("Murder.Assets.CharacterAsset")
-    count = 0
-
-    for char in characters:
-        name = char.get("Name", f"unknown_{count}")
-        safe_name = "".join(c if c.isalnum() or c in " _-" else "_" for c in name)
-        out_path = output_dir / f"{safe_name}.gum"
-        script = exporter.export_character(char)
-        out_path.write_text(script, encoding="utf-8")
-        count += 1
-
-    return count
+    from murder_unpack.extract.gum_exporter import export_dialogues_gum
+    return export_dialogues_gum(db, output_dir)
 
 
 def _export_localization_csv(db: GameDatabase, output_dir: Path) -> int:

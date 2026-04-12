@@ -61,7 +61,7 @@ murder-unpack recover "path/to/game" recovered/ --engine-version main
 | Command | Description |
 |---------|-------------|
 | `info <game_dir>` | Show game info, asset counts, and atlas list |
-| `extract-all <game_dir> <output_dir>` | Full extraction: data + sprites + dialogues |
+| `extract-all <game_dir> <output_dir>` | Full extraction: data, sprites, dialogues, and localization |
 | `extract-data <game_dir> <output_dir>` | Dump all `.gz` data files as plain JSON |
 | `extract-sprites <game_dir> <output_dir>` | Extract sprites from atlas sheets as PNG |
 | `extract-dialogue <game_dir> <output_dir>` | Export dialogues as `.gum` scripts, markdown, or both |

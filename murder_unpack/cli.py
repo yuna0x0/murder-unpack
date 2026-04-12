@@ -14,9 +14,17 @@ _registry = PluginRegistry()
 
 @click.group()
 @click.version_option(package_name="murder-unpack")
-def main() -> None:
+@click.pass_context
+def main(ctx: click.Context) -> None:
     """Murder Engine game unpacker, recovery, and modding toolkit."""
     _registry.discover_all()
+    # Register plugin commands after discovery
+    for cmd_name, cmd_obj in _registry.commands.items():
+        if hasattr(cmd_obj, "run"):
+            main.add_command(click.Command(
+                name=cmd_name, callback=cmd_obj.run,
+                help=getattr(cmd_obj, "help", ""),
+            ))
 
 
 # ─── info ────────────────────────────────────────────────────────────────────
@@ -236,6 +244,7 @@ def analyze_binary(
     click.echo(f"  Systems: {len(types.systems)}")
     click.echo(f"  Services: {len(types.services)}")
     click.echo(f"  State Machines: {len(types.state_machines)}")
+    click.echo(f"  Interactions: {len(types.interactions)}")
     click.echo(f"  Other: {len(types.other)}")
 
     # Extract assemblies from bundle
@@ -396,9 +405,3 @@ def plugins_dir() -> None:
     for d in _registry.plugin_dirs():
         exists = "exists" if d.exists() else "not found"
         click.echo(f"  {d} ({exists})")
-
-
-# Register plugin commands
-for cmd_name, cmd_obj in _registry.commands.items():
-    if hasattr(cmd_obj, "run"):
-        main.add_command(click.Command(name=cmd_name, callback=cmd_obj.run, help=getattr(cmd_obj, "help", "")))
