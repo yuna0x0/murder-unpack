@@ -1,0 +1,184 @@
+"""Generate C# project scaffold for Murder Engine editor projects."""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from typing import Any
+
+# Murder engine .csproj relative paths (from project root)
+MURDER_CSPROJ = "murder/src/Murder/Murder.csproj"
+MURDER_EDITOR_CSPROJ = "murder/src/Murder.Editor/Murder.Editor.csproj"
+BANG_GENERATOR_CSPROJ = "murder/bang/src/Bang.Generator/Bang.Generator.csproj"
+MURDER_SERIALIZER_CSPROJ = "murder/src/Murder.Serializer/Murder.Serializer.csproj"
+
+
+def generate_solution(project_dir: Path, game_name: str) -> None:
+    """Generate the full project scaffold."""
+    project_dir = Path(project_dir)
+
+    _write_sln(project_dir, game_name)
+    _write_game_csproj(project_dir, game_name)
+    _write_editor_csproj(project_dir, game_name)
+    _write_program_cs(project_dir, game_name)
+    _write_game_architect(project_dir, game_name)
+    _write_game_class(project_dir, game_name)
+
+
+def _write_sln(project_dir: Path, game_name: str) -> None:
+    sln_path = project_dir / f"{game_name}.sln"
+    game_guid = "FAE04EC0-301F-11D3-BF4B-00C04F79EFBC"
+    content = f"""\
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{{{game_guid}}}") = "{game_name}", "src\\{game_name}\\{game_name}.csproj", "{{11111111-1111-1111-1111-111111111111}}"
+EndProject
+Project("{{{game_guid}}}") = "{game_name}.Editor", "src\\{game_name}.Editor\\{game_name}.Editor.csproj", "{{22222222-2222-2222-2222-222222222222}}"
+EndProject
+Global
+\tGlobalSection(SolutionConfigurationPlatforms) = preSolution
+\t\tDebug|Any CPU = Debug|Any CPU
+\t\tRelease|Any CPU = Release|Any CPU
+\tEndGlobalSection
+\tGlobalSection(ProjectConfigurationPlatforms) = postSolution
+\t\t{{11111111-1111-1111-1111-111111111111}}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+\t\t{{11111111-1111-1111-1111-111111111111}}.Debug|Any CPU.Build.0 = Debug|Any CPU
+\t\t{{22222222-2222-2222-2222-222222222222}}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+\t\t{{22222222-2222-2222-2222-222222222222}}.Debug|Any CPU.Build.0 = Debug|Any CPU
+\tEndGlobalSection
+EndGlobal
+"""
+    sln_path.write_text(content, encoding="utf-8")
+
+
+def _write_game_csproj(project_dir: Path, game_name: str) -> None:
+    game_dir = project_dir / "src" / game_name
+    game_dir.mkdir(parents=True, exist_ok=True)
+
+    # Relative paths from src/GameName/ to project root
+    murder_ref = f"../../{MURDER_CSPROJ}"
+    bang_ref = f"../../{BANG_GENERATOR_CSPROJ}"
+    serializer_ref = f"../../{MURDER_SERIALIZER_CSPROJ}"
+
+    content = f"""\
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <PublishAot>true</PublishAot>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="{murder_ref}" />
+    <ProjectReference Include="{bang_ref}" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="{serializer_ref}" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+  </ItemGroup>
+</Project>
+"""
+    (game_dir / f"{game_name}.csproj").write_text(content, encoding="utf-8")
+
+
+def _write_editor_csproj(project_dir: Path, game_name: str) -> None:
+    editor_dir = project_dir / "src" / f"{game_name}.Editor"
+    editor_dir.mkdir(parents=True, exist_ok=True)
+
+    murder_editor_ref = f"../../{MURDER_EDITOR_CSPROJ}"
+    game_ref = f"../{game_name}/{game_name}.csproj"
+    bang_ref = f"../../{BANG_GENERATOR_CSPROJ}"
+    serializer_ref = f"../../{MURDER_SERIALIZER_CSPROJ}"
+
+    content = f"""\
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <DefineConstants>$(DefineConstants);EDITOR</DefineConstants>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="{murder_editor_ref}" />
+    <ProjectReference Include="{game_ref}" />
+    <ProjectReference Include="{bang_ref}" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="{serializer_ref}" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+  </ItemGroup>
+</Project>
+"""
+    (editor_dir / f"{game_name}.Editor.csproj").write_text(content, encoding="utf-8")
+
+
+def _write_program_cs(project_dir: Path, game_name: str) -> None:
+    editor_dir = project_dir / "src" / f"{game_name}.Editor"
+    content = f"""\
+using Murder.Editor;
+
+namespace {game_name}.Editor;
+
+public static class Program
+{{
+    [STAThread]
+    static void Main()
+    {{
+        using var editor = new Architect(new {game_name}Architect());
+        editor.Run();
+    }}
+}}
+"""
+    (editor_dir / "Program.cs").write_text(content, encoding="utf-8")
+
+
+def _write_game_architect(project_dir: Path, game_name: str) -> None:
+    editor_dir = project_dir / "src" / f"{game_name}.Editor"
+    content = f"""\
+using Murder.Editor;
+
+namespace {game_name}.Editor;
+
+public class {game_name}Architect : {game_name}Game, IMurderArchitect
+{{
+}}
+"""
+    (editor_dir / f"{game_name}Architect.cs").write_text(content, encoding="utf-8")
+
+
+def _write_game_class(project_dir: Path, game_name: str) -> None:
+    game_dir = project_dir / "src" / game_name
+    content = f"""\
+using Murder;
+
+namespace {game_name};
+
+public class {game_name}Game : IMurderGame
+{{
+    public string Name => "{game_name}";
+}}
+"""
+    (game_dir / f"{game_name}Game.cs").write_text(content, encoding="utf-8")
+
+
+def generate_editor_config(
+    output_path: Path,
+    game_source_path: str,
+) -> None:
+    """Generate editor_config JSON with sensible defaults."""
+    config = {
+        "Name": "Editor Settings",
+        "BinResourcesPath": "resources",
+        "GameSourcePath": game_source_path,
+        "StartMaximized": False,
+        "WindowStartPosition": {"X": -1, "Y": -1},
+        "WindowSize": {"X": 1280, "Y": 720},
+        "AlwaysBuildAtlasOnStartup": False,
+        "SaveAsepriteInfoOnSpriteAsset": False,
+        "CheckForPackedAssetsIntegrity": False,
+        "FontScale": 1.0,
+        "WasdCameraSpeed": 100.0,
+        "DpiScale": 1.0,
+    }
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    json_str = json.dumps(config, indent=2, ensure_ascii=False)
+    output_path.write_text(json_str.replace("\n", "\r\n"), encoding="utf-8", newline="")

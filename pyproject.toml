@@ -1,0 +1,37 @@
+[project]
+name = "murder-unpack"
+version = "0.1.0"
+description = "Decompile, unpack, recover, and repack tools for Murder Engine games"
+readme = "README.md"
+license = "MIT"
+authors = [{ name = "yuna0x0" }]
+requires-python = ">=3.11"
+keywords = ["murder-engine", "game-modding", "unpacker", "decompiler", "reverse-engineering"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Topic :: Games/Entertainment",
+    "Topic :: Software Development :: Disassemblers",
+]
+dependencies = [
+    "Pillow",
+    "qoi",
+    "click",
+]
+
+[project.optional-dependencies]
+binary = ["dnfile", "pefile"]
+dev = ["pytest", "mypy"]
+
+[project.urls]
+Homepage = "https://github.com/yuna0x0/murder-unpack"
+Repository = "https://github.com/yuna0x0/murder-unpack"
+Issues = "https://github.com/yuna0x0/murder-unpack/issues"
+
+[project.scripts]
+murder-unpack = "murder_unpack.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
