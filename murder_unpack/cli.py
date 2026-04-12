@@ -324,11 +324,13 @@ def repack(project_dir: Path, output_dir: Path) -> None:
 @click.argument("game_dir", type=click.Path(exists=True, path_type=Path))
 @click.argument("output_dir", type=click.Path(path_type=Path))
 def extract_all(game_dir: Path, output_dir: Path) -> None:
-    """Full extraction: data, sprites, and dialogues."""
+    """Full extraction: data, sprites, dialogues (.gum + markdown), and localization."""
     from murder_unpack.core.gzip_json import decompress_gz_json, save_json
     from murder_unpack.extract.dialogue_extractor import extract_dialogues
     from murder_unpack.extract.game_data import GameDatabase
+    from murder_unpack.extract.gum_exporter import export_dialogues_gum
     from murder_unpack.extract.sprite_extractor import SpriteExtractor
+    from murder_unpack.recover.project_recovery import _export_localization_csv
 
     db = GameDatabase()
     db.load(game_dir)
@@ -353,10 +355,17 @@ def extract_all(game_dir: Path, output_dir: Path) -> None:
             total += count
         click.echo(f"Extracted {total} sprites to {sprites_dir}")
 
-    # Extract dialogues
+    # Extract dialogues — .gum (editor native) first, then markdown
     dialogue_dir = output_dir / "dialogues"
-    count = extract_dialogues(db, dialogue_dir)
-    click.echo(f"Exported {count} dialogues to {dialogue_dir}")
+    gum_count = export_dialogues_gum(db, dialogue_dir / "gum")
+    click.echo(f"Exported {gum_count} .gum scripts to {dialogue_dir / 'gum'}")
+    md_count = extract_dialogues(db, dialogue_dir / "markdown")
+    click.echo(f"Exported {md_count} markdown dialogues to {dialogue_dir / 'markdown'}")
+
+    # Extract localization CSV (editor native format)
+    loc_dir = output_dir / "localization"
+    loc_count = _export_localization_csv(db, loc_dir)
+    click.echo(f"Exported {loc_count} localization CSV files to {loc_dir}")
 
 
 # ─── plugins ─────────────────────────────────────────────────────────────────
