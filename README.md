@@ -9,7 +9,7 @@ Reverse-engineers exported Murder Engine games back into editor-openable project
 - **Full project recovery** — Reconstructs a Murder Engine editor project from an exported game
 - **Asset extraction** — Unpack all `.gz` data files into individual JSON assets
 - **Sprite extraction** — Extract individual sprites from texture atlas sheets as PNG
-- **Dialogue export** — Export dialogue trees to readable markdown
+- **Dialogue export** — Reconstruct `.gum` scripts (Murder's dialogue format) and export to markdown
 - **Binary analysis** — Detect .NET deployment format (NativeAOT, single-file bundle, self-contained)
 - **Bundle extraction** — Extract managed assemblies from .NET single-file bundles
 - **C# stub generation** — Auto-generate typed C# classes from packed JSON data
@@ -64,7 +64,7 @@ murder-unpack recover "path/to/game" recovered/ --engine-version main
 | `extract-all <game_dir> <output_dir>` | Full extraction: data + sprites + dialogues |
 | `extract-data <game_dir> <output_dir>` | Dump all `.gz` data files as plain JSON |
 | `extract-sprites <game_dir> <output_dir>` | Extract sprites from atlas sheets as PNG |
-| `extract-dialogue <game_dir> <output_dir>` | Export dialogue scripts to markdown |
+| `extract-dialogue <game_dir> <output_dir>` | Export dialogues as `.gum` scripts, markdown, or both |
 | `list-assets <game_dir>` | List assets with `--type` and `--name` filters |
 | `decode-qoi <input.qoi.gz> <output.png>` | Convert a single QOI image to PNG |
 
@@ -127,9 +127,11 @@ Murder Engine exports games as GZip-compressed JSON:
 1. **Load** — Decompress all `.gz` files, parse JSON, index 5000+ assets
 2. **Split** — Write each asset as an individual `.json` file in the correct editor directory
 3. **Scaffold** — Generate `.sln`, `.csproj`, `Program.cs` matching the [hellomurder](https://github.com/isadorasophia/hellomurder) template
-4. **Resources** — Copy atlas textures, fonts, shaders, sounds, images, video
-5. **Stubs** — Auto-generate C# stub classes for game-specific types (e.g., `Road.Assets.*`)
-6. **Engine** — Clone Murder Engine at the specified version with submodules
+4. **Resources** — Copy atlas, fonts, shaders, sounds, images, video, FMOD libs, icons
+5. **Dialogues** — Reconstruct `.gum` dialogue scripts from compiled CharacterAsset data
+6. **Localization** — Export localization CSV files for each language (matching editor format)
+7. **Stubs** — Auto-generate C# stub classes for game-specific types (e.g., `Road.Assets.*`)
+8. **Engine** — Clone Murder Engine at the specified version with submodules
 
 ### Binary Detection
 
