@@ -196,4 +196,80 @@ def generate_stubs(
         file_path.write_text("\n".join(lines), encoding="utf-8")
         count += 1
 
+    # Generate component stubs from world/prefab data
+    comp_count = _generate_component_stubs(db, output_dir, namespace_filter)
+    count += comp_count
+
+    return count
+
+
+def _scan_component_types(db: GameDatabase, namespace_filter: str) -> set[str]:
+    """Scan all world/prefab assets for component $type references."""
+    comp_types: set[str] = set()
+
+    def scan(obj: Any, depth: int = 0) -> None:
+        if depth > 15:
+            return
+        if isinstance(obj, dict):
+            t = obj.get("$type", "")
+            if t and namespace_filter and t.startswith(namespace_filter):
+                if "Component" in t:
+                    comp_types.add(t)
+            for v in obj.values():
+                scan(v, depth + 1)
+        elif isinstance(obj, list):
+            for v in obj:
+                scan(v, depth + 1)
+
+    for asset in db.all_assets():
+        t = asset.get("$type", "")
+        if "World" in t or "Prefab" in t:
+            scan(asset)
+
+    return comp_types
+
+
+def _generate_component_stubs(
+    db: GameDatabase,
+    output_dir: Path,
+    namespace_filter: str,
+) -> int:
+    """Generate empty IComponent struct stubs for game-specific components.
+
+    This allows the Murder editor to load world entities without crashing
+    on IndexOutOfRangeException — the ComponentsLookup will have entries
+    for all component types even though they have no behavior.
+    """
+    comp_types = _scan_component_types(db, namespace_filter)
+    count = 0
+
+    for type_name in sorted(comp_types):
+        parts = type_name.rsplit(".", 1)
+        if len(parts) == 2:
+            namespace, class_name = parts
+        else:
+            continue
+
+        lines = [
+            "// Auto-generated component stub for editor compatibility",
+            "// This is an empty struct — original game logic is not recoverable",
+            "",
+            "using Bang.Components;",
+            "",
+            f"namespace {namespace};",
+            "",
+            f"public readonly struct {class_name} : IComponent",
+            "{",
+            "}",
+            "",
+        ]
+
+        ns_path = namespace.replace(".", "/")
+        file_dir = output_dir / ns_path
+        file_dir.mkdir(parents=True, exist_ok=True)
+        file_path = file_dir / f"{class_name}.cs"
+        if not file_path.exists():  # Don't overwrite asset stubs
+            file_path.write_text("\n".join(lines), encoding="utf-8")
+            count += 1
+
     return count
