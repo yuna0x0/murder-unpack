@@ -132,23 +132,23 @@ def recover_project(
     # It uses Game.Data.GameDirectory (= IMurderGame.Name) to compute paths.
     # No need to pre-create it.
 
-    # Step 10: Generate C# stubs for game-specific types
+    # Step 9: Generate C# stubs for game-specific types
     if generate_stubs_flag:
         stubs_dir = game_src_dir / "Generated"
         click.echo("Generating C# stubs for game-specific types...")
         stub_count = generate_stubs(db, stubs_dir)
         click.echo(f"  Generated {stub_count} stub classes")
 
-    # Step 11: Reconstruct .gum dialogue scripts
+    # Step 10: Reconstruct .gum dialogue scripts
     click.echo("Reconstructing .gum dialogue scripts...")
     raw_resources_dir = output_dir / "resources"
     raw_resources_dir.mkdir(exist_ok=True)
     gum_count = _export_gum_scripts(db, raw_resources_dir / "dialogues")
     click.echo(f"  Reconstructed {gum_count} .gum scripts")
 
-    # Step 12: Export localization CSV files
+    # Step 11: Export localization CSV files
     click.echo("Exporting localization CSV files...")
-    loc_count = _export_localization_csv(db, raw_resources_dir / "loc")
+    loc_count = export_localization_csv(db, raw_resources_dir / "loc")
     click.echo(f"  Exported {loc_count} localization CSV files")
 
     click.echo(f"\nRecovery complete! Project at: {output_dir}")
@@ -195,7 +195,7 @@ def _export_gum_scripts(db: GameDatabase, output_dir: Path) -> int:
     return export_dialogues_gum(db, output_dir)
 
 
-def _export_localization_csv(db: GameDatabase, output_dir: Path) -> int:
+def export_localization_csv(db: GameDatabase, output_dir: Path) -> int:
     """Export localization assets as CSV files matching Murder's editor format.
 
     Murder's editor exports localization as CSV with columns:

@@ -199,10 +199,11 @@ public class {game_name}Game : IMurderGame
 
 /// <summary>
 /// Minimal components lookup stub.
+/// Extends MurderComponentsLookup so all Murder engine components are registered.
 /// The Bang.Generator source generator will create the real implementation
 /// with proper component type mappings when custom components are defined.
 /// </summary>
-public class {game_name}ComponentsLookup : ComponentsLookup
+public class {game_name}ComponentsLookup : MurderComponentsLookup
 {{
 }}
 """

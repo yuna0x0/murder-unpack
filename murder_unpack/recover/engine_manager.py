@@ -12,46 +12,59 @@ from typing import Any
 
 MURDER_REPO = "https://github.com/isadorasophia/murder.git"
 
+# Default version when no fingerprint matches. The Murder Engine maintainer
+# recommends building against main, and an unrecognized config likely means
+# the game was built from a version newer than our fingerprint table.
+_DEFAULT_VERSION = "main"
+
+# Known version fingerprints, ordered oldest → newest.
+# Each entry: (version, required_fields, excluded_fields)
+# A config matches if ALL required fields are present and NONE of the excluded fields are.
+_VERSION_FINGERPRINTS: list[tuple[str, set[str], set[str]]] = [
+    ("rel/3.6", {"Fullscreen"}, {"EnforceResolution"}),
+    ("rel/4.0", {"EnforceResolution"}, {"LocalizationPath"}),
+    ("rel/5.0", {"EnforceResolution", "LocalizationPath"}, {"FeedbackUrl"}),
+    ("rel/7.0", {"FeedbackUrl"}, {"PreloadTextures"}),
+    ("rel/10.0", {"PreloadTextures"}, {"VideoPath", "DefaultPalette", "MinimumVelocityForSweep"}),
+    ("rel/11.0", {"VideoPath", "DefaultPalette", "MinimumVelocityForSweep"}, set()),
+]
+
+# Fields that appear in our newest known fingerprint (rel/11.0).
+# If a config has all of these, it's at least rel/11.0.
+_LATEST_KNOWN_MARKERS = {"VideoPath", "DefaultPalette", "MinimumVelocityForSweep"}
+
 
 def detect_engine_version(game_config: dict[str, Any]) -> str:
     """Detect the Murder Engine version from game_config fields.
 
-    Uses a fingerprinting approach based on which fields are present/absent
-    in the serialized GameProfile, as fields were added/removed across versions.
+    Murder Engine does not embed a version string in exported games.
+    This function infers the version by fingerprinting which fields are
+    present in the serialized GameProfile, since fields were added and
+    removed across major releases.
 
-    Returns a branch name (e.g., "rel/11.0", "rel/9.0") or "main".
+    The fingerprint table covers rel/3.6 through rel/11.0. For configs
+    that match our newest known fingerprint, we return that version.
+    For configs that don't match any fingerprint (likely a newer release),
+    we fetch the latest rel/ branch from GitHub.
+
+    Returns a branch name (e.g., "rel/11.0", "rel/10.0").
     """
     keys = set(game_config.keys())
 
-    # rel/11.0+ : VideoPath, DefaultPalette, MinimumVelocityForSweep added;
-    #             GameWidth/GameHeight/GameScale/FeedbackUrl removed
-    if "VideoPath" in keys or "DefaultPalette" in keys or "MinimumVelocityForSweep" in keys:
-        return "rel/11.0"
+    if not keys:
+        return _DEFAULT_VERSION
 
-    # rel/8.0-10.0 : PreloadTextures added, FeedbackUrl still present
-    if "PreloadTextures" in keys:
-        # 8.0 vs 9.0/10.0: FixedUpdateFactor removed in 8.0+
-        # 9.0 and 10.0 are identical in GameProfile — default to rel/10.0
-        return "rel/10.0"
+    # Walk fingerprints newest → oldest, return first match.
+    # "Match" means all required fields present AND no excluded fields present.
+    for version, required, excluded in reversed(_VERSION_FINGERPRINTS):
+        if required.issubset(keys) and not excluded.intersection(keys):
+            # rel/8.0–10.0 share the same GameProfile fields.
+            # We can't distinguish them, so we default to rel/10.0.
+            return version
 
-    # rel/7.0 : FeedbackUrl added, EnforceResolution/Fullscreen removed
-    if "FeedbackUrl" in keys:
-        return "rel/7.0"
-
-    # rel/5.0 : LocalizationPath added, EnforceResolution still present
-    if "LocalizationPath" in keys and "EnforceResolution" in keys:
-        return "rel/5.0"
-
-    # rel/4.0 : EnforceResolution, ScalingFilter, DefaultGridCellSize added
-    if "EnforceResolution" in keys:
-        return "rel/4.0"
-
-    # rel/3.6 : baseline (Fullscreen present, no EnforceResolution)
-    if "Fullscreen" in keys:
-        return "rel/3.6"
-
-    # Unknown — default to latest
-    return "main"
+    # No fingerprint matched. The game was likely built from a version
+    # newer than our table. Default to main per Murder Engine convention.
+    return _DEFAULT_VERSION
 
 
 def list_versions() -> dict[str, list[str]]:
@@ -83,7 +96,7 @@ def list_versions() -> dict[str, list[str]]:
 
 def clone_engine(
     target_dir: Path | str,
-    version: str = "main",
+    version: str = _DEFAULT_VERSION,
     depth: int | None = 1,
 ) -> Path:
     """Clone the Murder engine repo at a specific version.

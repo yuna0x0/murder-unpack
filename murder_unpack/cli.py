@@ -347,7 +347,7 @@ def extract_all(game_dir: Path, output_dir: Path) -> None:
     from murder_unpack.extract.game_data import GameDatabase
     from murder_unpack.extract.gum_exporter import export_dialogues_gum
     from murder_unpack.extract.sprite_extractor import SpriteExtractor
-    from murder_unpack.recover.project_recovery import _export_localization_csv
+    from murder_unpack.recover.project_recovery import export_localization_csv
 
     db = GameDatabase()
     db.load(game_dir)
@@ -381,7 +381,7 @@ def extract_all(game_dir: Path, output_dir: Path) -> None:
 
     # Extract localization CSV (editor native format)
     loc_dir = output_dir / "localization"
-    loc_count = _export_localization_csv(db, loc_dir)
+    loc_count = export_localization_csv(db, loc_dir)
     click.echo(f"Exported {loc_count} localization CSV files to {loc_dir}")
 
 
