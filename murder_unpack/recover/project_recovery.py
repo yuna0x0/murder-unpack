@@ -31,6 +31,11 @@ from murder_unpack.recover.asset_splitter import (
     split_assets,
 )
 from murder_unpack.recover.engine_manager import clone_engine, detect_engine_version
+from murder_unpack.recover.native_libs import (
+    check_arm64_readiness,
+    is_arm64_windows,
+    setup_arm64_workaround,
+)
 from murder_unpack.recover.scaffold import generate_solution
 from murder_unpack.recover.stub_generator import generate_stubs
 
@@ -101,6 +106,12 @@ def recover_project(
     click.echo("Generating project scaffold...")
     generate_solution(output_dir, game_name)
 
+    # Step 4b: Handle ARM64 Windows — Murder.FNA has no ARM64 native libs
+    if is_arm64_windows():
+        click.echo("Detected ARM64 Windows — configuring x64 build workaround...")
+        setup_arm64_workaround(output_dir)
+        check_arm64_readiness(output_dir)
+
     # Step 5: Set up resource directories
     game_src_dir = output_dir / "src" / game_name
     resources_dir = game_src_dir / "resources"
@@ -167,7 +178,11 @@ def recover_project(
     click.echo(f"  Exported {loc_count} localization CSV files")
 
     click.echo(f"\nRecovery complete! Project at: {output_dir}")
-    click.echo(f"  To open in editor: cd {output_dir}/src/{game_name}.Editor && dotnet run")
+    if is_arm64_windows():
+        click.echo(f"  To open in editor: run-editor.cmd")
+        click.echo(f"  Or: dotnet build -r win-x64 && run the x64 exe from bin/Debug/net8.0/win-x64/")
+    else:
+        click.echo(f"  To open in editor: cd {output_dir}/src/{game_name}.Editor && dotnet run")
 
 
 def _patch_engine(output_dir: Path) -> None:
