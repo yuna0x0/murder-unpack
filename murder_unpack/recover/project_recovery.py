@@ -236,16 +236,40 @@ def _patch_engine(output_dir: Path) -> None:
             gdm_path.write_text(gdm_src, encoding="utf-8")
             click.echo("  Patched engine: GetAsset returns placeholders for missing assets")
 
-    # Patch Entity.AddComponentInternal — fix array resize for large indices
+    # Patch Entity.cs — two fixes:
+    # 1. Array resize for large component indices
+    # 2. CheckForRequiredComponents: warn instead of Debug.Assert (which
+    #    terminates the process). Recovered entities have incomplete
+    #    components because some game-specific types resolve to object.
     entity_path = output_dir / "murder/bang/src/Bang/Entities/Entity.cs"
     if entity_path.exists():
         entity_src = entity_path.read_text(encoding="utf-8")
+        patched = False
+
         old_resize = "bool[] newLookup = new bool[_availableComponents.Length * 2];"
         new_resize = "int newSize = Math.Max(_availableComponents.Length * 2, index + 1);\n                bool[] newLookup = new bool[newSize];"
         if old_resize in entity_src:
             entity_src = entity_src.replace(old_resize, new_resize)
+            patched = True
+
+        old_assert = (
+            '                        Debug.Assert(!report,\n'
+            '                            $"Missing {requiredType.Name} required by {t.Name} in entity declaration!");'
+        )
+        new_warn = (
+            '                        if (report)\n'
+            '                        {\n'
+            '                            System.Console.Error.WriteLine(\n'
+            '                                $"Warning: Missing {requiredType.Name} required by {t.Name} in entity declaration!");\n'
+            '                        }'
+        )
+        if old_assert in entity_src:
+            entity_src = entity_src.replace(old_assert, new_warn)
+            patched = True
+
+        if patched:
             entity_path.write_text(entity_src, encoding="utf-8")
-            click.echo("  Patched engine: Entity component array resize for large indices")
+            click.echo("  Patched engine: Entity array resize and component requirement checks")
 
 
 def _detect_game_name(game_config: dict[str, Any]) -> str:
