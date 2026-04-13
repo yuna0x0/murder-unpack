@@ -29,10 +29,6 @@ _VERSION_FINGERPRINTS: list[tuple[str, set[str], set[str]]] = [
     ("rel/11.0", {"VideoPath", "DefaultPalette", "MinimumVelocityForSweep"}, set()),
 ]
 
-# Fields that appear in our newest known fingerprint (rel/11.0).
-# If a config has all of these, it's at least rel/11.0.
-_LATEST_KNOWN_MARKERS = {"VideoPath", "DefaultPalette", "MinimumVelocityForSweep"}
-
 
 def detect_engine_version(game_config: dict[str, Any]) -> str:
     """Detect the Murder Engine version from game_config fields.

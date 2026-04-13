@@ -192,7 +192,7 @@ def decode_qoi(input_path: Path, output_path: Path) -> None:
 @click.option("--engine-version", default=None, help="Engine branch/tag/commit (auto-detected if omitted)")
 @click.option("--engine-path", type=click.Path(path_type=Path), default=None, help="Use existing engine clone")
 @click.option("--skip-engine", is_flag=True, help="Don't clone engine")
-@click.option("--game-name", default=None, help="Project name")
+@click.option("--game-name", default=None, help="Project name (auto-detected from game assembly)")
 @click.option("--no-stubs", is_flag=True, help="Don't generate C# stubs")
 def recover(
     game_dir: Path, output_dir: Path,

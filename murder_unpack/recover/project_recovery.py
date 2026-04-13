@@ -25,7 +25,11 @@ import click
 
 from murder_unpack.core.gzip_json import load_json, save_json
 from murder_unpack.extract.game_data import GameDatabase
-from murder_unpack.recover.asset_splitter import split_assets
+from murder_unpack.recover.asset_splitter import (
+    detect_game_assembly,
+    remap_assembly_names,
+    split_assets,
+)
 from murder_unpack.recover.engine_manager import clone_engine, detect_engine_version
 from murder_unpack.recover.scaffold import generate_solution
 from murder_unpack.recover.stub_generator import generate_stubs
@@ -61,9 +65,9 @@ def recover_project(
     db.load(game_dir)
     click.echo(f"  Loaded {db.total_assets} assets across {len(db.list_types())} types")
 
-    # Auto-detect game name
+    # Auto-detect game name from original assembly, then game_config
     if game_name is None:
-        game_name = _detect_game_name(db.game_config)
+        game_name = detect_game_assembly(db) or _detect_game_name(db.game_config)
     click.echo(f"  Project name: {game_name}")
 
     # Auto-detect engine version from game_config if not specified
@@ -90,36 +94,47 @@ def recover_project(
             clone_engine(output_dir, engine_version)
             click.echo("  Engine cloned with submodules")
 
-    # Step 3: Create project scaffold
+    # Step 3: Patch engine for recovery compatibility
+    _patch_engine(output_dir)
+
+    # Step 4: Create project scaffold
     click.echo("Generating project scaffold...")
     generate_solution(output_dir, game_name)
 
-    # Step 4: Set up resource directories
+    # Step 5: Set up resource directories
     game_src_dir = output_dir / "src" / game_name
     resources_dir = game_src_dir / "resources"
     resources_dir.mkdir(parents=True, exist_ok=True)
 
-    # Step 5: Split packed assets into individual .json files
+    # Step 6: Detect original assembly name and remap if needed
+    assembly_remap = None
+    original_assembly = detect_game_assembly(db)
+    if original_assembly and original_assembly != game_name:
+        assembly_remap = (original_assembly, game_name)
+        click.echo(f"  Remapping assembly: {original_assembly} → {game_name}")
+
+    # Step 7: Split packed assets into individual .json files
     click.echo("Splitting packed assets into individual files...")
-    counts = split_assets(db, resources_dir)
+    counts = split_assets(db, resources_dir, assembly_remap=assembly_remap)
     total_written = sum(counts.values())
     click.echo(f"  Wrote {total_written} asset files across {len(counts)} directories")
 
-    # Step 6: Copy game_config
+    # Step 8: Copy game_config
     src_config = game_dir / "resources" / "game_config"
     if src_config.exists():
         config = load_json(src_config)
-        # Optionally remap RoadGameProfile -> GameProfile for editor compat
         if config.get("$type") == "Road.Assets.RoadGameProfile":
             config["$type"] = "Murder.Assets.GameProfile"
+        if assembly_remap:
+            config = remap_assembly_names(config, *assembly_remap)
         save_json(config, resources_dir / "game_config")
-        click.echo("  Copied game_config (remapped $type for editor compatibility)")
+        click.echo("  Copied game_config")
 
-    # Step 7: Copy ALL resource directories
+    # Step 9: Copy ALL resource directories
     click.echo("Copying resource files...")
     _copy_resources(game_dir, resources_dir)
 
-    # Step 8: Copy packed data (for game runtime)
+    # Step 10: Copy packed data (for game runtime)
     packed_dir = game_src_dir / "packed" / "content"
     packed_dir.mkdir(parents=True, exist_ok=True)
     content_dir = game_dir / "resources" / "content"
@@ -132,21 +147,21 @@ def recover_project(
     # It uses Game.Data.GameDirectory (= IMurderGame.Name) to compute paths.
     # No need to pre-create it.
 
-    # Step 9: Generate C# stubs for game-specific types
+    # Step 11: Generate C# stubs for game-specific types
     if generate_stubs_flag:
         stubs_dir = game_src_dir / "Generated"
         click.echo("Generating C# stubs for game-specific types...")
         stub_count = generate_stubs(db, stubs_dir)
         click.echo(f"  Generated {stub_count} stub classes")
 
-    # Step 10: Reconstruct .gum dialogue scripts
+    # Step 12: Reconstruct .gum dialogue scripts
     click.echo("Reconstructing .gum dialogue scripts...")
     raw_resources_dir = output_dir / "resources"
     raw_resources_dir.mkdir(exist_ok=True)
     gum_count = _export_gum_scripts(db, raw_resources_dir / "dialogues")
     click.echo(f"  Reconstructed {gum_count} .gum scripts")
 
-    # Step 11: Export localization CSV files
+    # Step 13: Export localization CSV files
     click.echo("Exporting localization CSV files...")
     loc_count = export_localization_csv(db, raw_resources_dir / "loc")
     click.echo(f"  Exported {loc_count} localization CSV files")
@@ -155,8 +170,86 @@ def recover_project(
     click.echo(f"  To open in editor: cd {output_dir}/src/{game_name}.Editor && dotnet run")
 
 
+def _patch_engine(output_dir: Path) -> None:
+    """Apply compatibility patches to the Murder engine for recovered projects.
+
+    Patches GetAsset to log warnings instead of throwing when assets are
+    missing. Recovered projects may have assets that fail to deserialize
+    (due to game-specific types), so hard crashes on missing GUIDs would
+    make the editor unusable.
+    """
+    # Patch JsonTypeConverter to return typeof(object) instead of throwing
+    # when a type can't be resolved. This is the root cause of most
+    # deserialization failures — game-specific types like Road.Systems.*
+    # throw JsonException, killing the entire asset load.
+    jtc_path = output_dir / "murder/src/Murder/Utilities/Serialization/JsonTypeConverter.cs"
+    if jtc_path.exists():
+        jtc_src = jtc_path.read_text(encoding="utf-8")
+        old_throw = (
+            '            // TODO: Do something smarter that converts previous types into new ones?\n'
+            '            throw new JsonException($"Type {assemblyQualifiedName} not found!");'
+        )
+        new_return = (
+            '            GameLogger.Warning($"Type not found: {assemblyQualifiedName}");\n'
+            '            return typeof(object);'
+        )
+        if old_throw in jtc_src:
+            jtc_src = jtc_src.replace(old_throw, new_return)
+            # Add GameLogger import if not present
+            if "using Murder.Diagnostics;" not in jtc_src:
+                jtc_src = jtc_src.replace(
+                    "using Murder.Utilities;",
+                    "using Murder.Diagnostics;\nusing Murder.Utilities;",
+                )
+            jtc_path.write_text(jtc_src, encoding="utf-8")
+            click.echo("  Patched engine: JsonTypeConverter gracefully handles missing types")
+
+    # Patch GetAsset to return empty placeholders instead of throwing.
+    # Even with better deserialization, some assets may still not load.
+    # Throwing here propagates through ImGui draw code, corrupting its
+    # Begin/End state stack and causing native SEGV.
+    gdm_path = output_dir / "murder/src/Murder/Data/GameDataManager.cs"
+    if gdm_path.exists():
+        gdm_src = gdm_path.read_text(encoding="utf-8")
+
+        old_generic = 'throw new ArgumentException($"Unable to find the asset of type {typeof(T).Name} with id: {id} in database.");'
+        new_generic = (
+            'GameLogger.Warning($"Unable to find the asset of type {typeof(T).Name} with id: {id} in database.");\n'
+            '            try { return System.Activator.CreateInstance<T>(); } catch { }\n'
+            '            return default!;'
+        )
+
+        old_nongeneric = 'throw new ArgumentException($"Unable to find the asset with id: {id} in database.");'
+        new_nongeneric = (
+            'GameLogger.Warning($"Unable to find the asset with id: {id} in database.");\n'
+            '            return default!;'
+        )
+
+        patched = False
+        if old_generic in gdm_src:
+            gdm_src = gdm_src.replace(old_generic, new_generic)
+            patched = True
+        if old_nongeneric in gdm_src:
+            gdm_src = gdm_src.replace(old_nongeneric, new_nongeneric)
+            patched = True
+        if patched:
+            gdm_path.write_text(gdm_src, encoding="utf-8")
+            click.echo("  Patched engine: GetAsset returns placeholders for missing assets")
+
+    # Patch Entity.AddComponentInternal — fix array resize for large indices
+    entity_path = output_dir / "murder/bang/src/Bang/Entities/Entity.cs"
+    if entity_path.exists():
+        entity_src = entity_path.read_text(encoding="utf-8")
+        old_resize = "bool[] newLookup = new bool[_availableComponents.Length * 2];"
+        new_resize = "int newSize = Math.Max(_availableComponents.Length * 2, index + 1);\n                bool[] newLookup = new bool[newSize];"
+        if old_resize in entity_src:
+            entity_src = entity_src.replace(old_resize, new_resize)
+            entity_path.write_text(entity_src, encoding="utf-8")
+            click.echo("  Patched engine: Entity component array resize for large indices")
+
+
 def _detect_game_name(game_config: dict[str, Any]) -> str:
-    """Try to detect a reasonable project name from game_config."""
+    """Fallback game name detection from game_config Name field."""
     name = game_config.get("Name", "")
     if name and name != "Game Profile":
         return name.replace(" ", "")

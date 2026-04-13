@@ -75,7 +75,7 @@ murder-unpack list-assets "path/to/game" --type WorldAsset
 ```bash
 murder-unpack recover "path/to/game" recovered/ \
     --engine-version rel/11.0 \    # Override auto-detected version
-    --game-name MyGame \           # Project name (auto-detected if omitted)
+    --game-name MyGame \           # Project name (default: original assembly name)
     --skip-engine \                # Don't clone engine
     --engine-path /path/to/murder  # Use existing engine
     --no-stubs                     # Skip C# stub generation
@@ -129,7 +129,7 @@ Games compiled with NativeAOT (like most shipped Murder Engine games) have their
 - **Game-specific systems** — ECS systems that drive gameplay logic.
 - **State machines, interactions, services** — All compiled game code.
 
-The editor will open and you can browse assets, but world entities that depend on missing game logic may not render or behave correctly.
+The recovery process patches the engine to warn instead of crash when referencing missing assets, so the editor remains usable. However, world entities that depend on missing game logic may not render or behave correctly.
 
 ### Dialogue Reconstruction
 

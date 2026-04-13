@@ -190,7 +190,7 @@ public class {game_name}Game : IMurderGame
 {{
     public string Name => "{game_name}";
 
-    public JsonSerializerOptions Options => MurderSerializerOptionsExtensions.Options;
+    public JsonSerializerOptions Options => {game_name}SerializerOptionsExtensions.Options;
 
     public ComponentsLookup ComponentsLookup => new {game_name}ComponentsLookup();
 
