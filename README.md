@@ -5,13 +5,15 @@ Reverse-engineer exported [Murder Engine](https://github.com/isadorasophia/murde
 ## Features
 
 - **Project recovery** — Reconstruct a Murder Engine editor project from an exported game
+- **C# decompilation** — Full source recovery from managed single-file bundles via ilspycmd
+- **C# stub generation** — Fallback: auto-generate typed C# classes from packed JSON data (NativeAOT games)
 - **Asset extraction** — Unpack `.gz` data files into individual JSON assets
 - **Sprite extraction** — Extract individual sprites from texture atlas sheets as PNG
 - **Dialogue export** — Reconstruct `.gum` scripts and export to markdown
 - **Localization export** — Export localization CSV files matching Murder's editor format
 - **Engine version detection** — Auto-detect engine version from game_config fingerprinting
-- **Binary analysis** — Detect .NET deployment format (NativeAOT, single-file, self-contained)
-- **C# stub generation** — Auto-generate typed C# classes from packed JSON data
+- **Binary analysis** — Detect .NET deployment format (NativeAOT, single-file, self-contained) with managed assembly detection
+- **ARM64 Windows support** — Auto-configures x64 build workaround for Murder.FNA
 - **Repacking** — Repack modified assets back into `.gz` format
 - **Plugin system** — Extend with drop-in `.py` files or pip-installable packages
 
@@ -23,6 +25,7 @@ Reverse-engineer exported [Murder Engine](https://github.com/isadorasophia/murde
 - [uv](https://docs.astral.sh/uv/) (recommended) or pip
 - Git (for engine cloning)
 - .NET 8 SDK (for building recovered projects)
+- [ilspycmd](https://github.com/icsharpcode/ILSpy) (optional, for C# decompilation): `dotnet tool install -g ilspycmd`
 
 ### Install
 
@@ -66,7 +69,7 @@ murder-unpack list-assets "path/to/game" --type WorldAsset
 | `recover` | Full editor project recovery |
 | `engine-versions` | List available Murder Engine branches and tags |
 | `repack` | Repack modified assets back into `.gz` format |
-| `analyze-binary` | Detect .NET format, extract types from NativeAOT binaries |
+| `analyze-binary` | Detect .NET format, managed assembly detection, extract types |
 | `plugins list` | List loaded plugins |
 | `plugins dir` | Show plugin directories |
 
@@ -78,7 +81,8 @@ murder-unpack recover "path/to/game" recovered/ \
     --game-name MyGame \           # Project name (default: original assembly name)
     --skip-engine \                # Don't clone engine
     --engine-path /path/to/murder  # Use existing engine
-    --no-stubs                     # Skip C# stub generation
+    --no-stubs \                   # Skip C# stub/decompilation
+    --decompile-timeout 1200       # ilspycmd timeout in seconds (default: 600)
 ```
 
 ## Plugin System
@@ -121,13 +125,14 @@ Murder Engine does not embed a version string in exported games. Version detecti
 - Some version ranges are **indistinguishable** (e.g., rel/8.0, rel/9.0, and rel/10.0 share identical GameProfile fields — we default to rel/10.0).
 - Use `--engine-version` to override if auto-detection picks the wrong version.
 
-### NativeAOT Game Recovery
+### C# Source Recovery
 
-Games compiled with NativeAOT (like most shipped Murder Engine games) have their game logic baked into a native binary. Recovery can extract all **data and assets** but cannot recover:
+Recovery automatically detects the game's .NET deployment format and chooses the best strategy:
 
-- **Game-specific components** — ECS component structs with behavior logic (e.g., `Road.Components.*`). Generated stubs are empty placeholders that allow the project to compile but have no behavior.
-- **Game-specific systems** — ECS systems that drive gameplay logic.
-- **State machines, interactions, services** — All compiled game code.
+- **Managed single-file bundles** — Full C# source recovery via ilspycmd decompilation. The game assembly is extracted from the bundle, decompiled, and placed in the project. Requires `ilspycmd` (`dotnet tool install -g ilspycmd`). If ilspycmd is not installed or decompilation fails/times out, recovery falls back to stub generation.
+- **NativeAOT binaries** — Game logic is baked into a native binary and cannot be decompiled. Recovery generates empty C# stubs from packed JSON data that allow the project to compile but have no behavior. Systems, state machines, interactions, and services are not recoverable.
+
+Use `--decompile-timeout` to increase the timeout for ilspycmd if it runs slow on your machine (default: 600 seconds).
 
 The recovery process patches the engine to warn instead of crash when referencing missing assets, so the editor remains usable. However, world entities that depend on missing game logic may not render or behave correctly.
 
@@ -145,9 +150,6 @@ The `repack` command produces `.gz` files compatible with Murder's format, but r
 git clone https://github.com/yuna0x0/murder-unpack.git
 cd murder-unpack
 uv sync
-
-# Run tests
-uv run pytest
 ```
 
 ## License

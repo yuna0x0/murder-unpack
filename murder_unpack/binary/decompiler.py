@@ -7,7 +7,11 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import threading
+from io import TextIOWrapper
 from pathlib import Path
+
+import click
 
 
 def is_ilspycmd_available() -> bool:
@@ -27,17 +31,30 @@ def check_dotnet_tool() -> bool:
         return False
 
 
+def _stream_output(pipe: TextIOWrapper, prefix: str) -> None:
+    """Stream subprocess output lines to stderr for live progress."""
+    for line in iter(pipe.readline, ""):
+        line = line.rstrip()
+        if line:
+            click.echo(f"  [ilspycmd] {line}", err=True)
+    pipe.close()
+
+
 def decompile_assembly(
     assembly_path: Path | str,
     output_dir: Path | str,
+    reference_dir: Path | str | None = None,
     as_project: bool = True,
+    timeout: int = 600,
 ) -> bool:
     """Decompile a .NET assembly to C# source using ilspycmd.
 
     Args:
         assembly_path: Path to the .dll to decompile
         output_dir: Output directory for decompiled source
+        reference_dir: Directory containing reference assemblies
         as_project: If True, generate a compilable project (-p flag)
+        timeout: Timeout in seconds for ilspycmd (default: 600)
 
     Returns:
         True if decompilation succeeded
@@ -46,17 +63,53 @@ def decompile_assembly(
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    cmd = ["ilspycmd"]
+    cmd = ["ilspycmd", "--disable-updatecheck"]
+    if reference_dir is not None:
+        cmd.extend(["-r", str(reference_dir)])
     if as_project:
         cmd.extend(["-p", "--nested-directories"])
     cmd.extend(["-o", str(output_dir), str(assembly_path)])
 
+    click.echo(f"  Running: {' '.join(cmd)}")
+    click.echo(f"  Decompiling {assembly_path.name} → {output_dir}")
+
     try:
-        result = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=300,
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
         )
-        return result.returncode == 0
-    except (FileNotFoundError, subprocess.TimeoutExpired):
+
+        # Stream stdout and stderr in background threads so user sees progress
+        stdout_thread = threading.Thread(
+            target=_stream_output, args=(proc.stdout, "stdout"), daemon=True,
+        )
+        stderr_thread = threading.Thread(
+            target=_stream_output, args=(proc.stderr, "stderr"), daemon=True,
+        )
+        stdout_thread.start()
+        stderr_thread.start()
+
+        returncode = proc.wait(timeout=timeout)
+        stdout_thread.join(timeout=5)
+        stderr_thread.join(timeout=5)
+
+        if returncode == 0:
+            # Count decompiled files
+            cs_files = list(output_dir.rglob("*.cs"))
+            click.echo(f"  Decompilation complete: {len(cs_files)} .cs files")
+        else:
+            click.echo(f"  ilspycmd exited with code {returncode}")
+
+        return returncode == 0
+    except subprocess.TimeoutExpired:
+        click.echo(f"  ilspycmd timed out after {timeout}s — killing process")
+        proc.kill()
+        proc.wait()
+        return False
+    except FileNotFoundError:
+        click.echo("  ilspycmd not found")
         return False
 
 

@@ -194,10 +194,13 @@ def decode_qoi(input_path: Path, output_path: Path) -> None:
 @click.option("--skip-engine", is_flag=True, help="Don't clone engine")
 @click.option("--game-name", default=None, help="Project name (auto-detected from game assembly)")
 @click.option("--no-stubs", is_flag=True, help="Don't generate C# stubs")
+@click.option("--decompile-timeout", type=int, default=600,
+              help="Timeout in seconds for ilspycmd decompilation (default: 600)")
 def recover(
     game_dir: Path, output_dir: Path,
     engine_version: str, engine_path: Path | None,
     skip_engine: bool, game_name: str | None, no_stubs: bool,
+    decompile_timeout: int,
 ) -> None:
     """Recover exported game into a Murder Engine editor project."""
     from murder_unpack.recover.project_recovery import recover_project
@@ -210,6 +213,7 @@ def recover(
         engine_path=engine_path,
         skip_engine=skip_engine,
         generate_stubs_flag=not no_stubs,
+        decompile_timeout=decompile_timeout,
     )
 
 
@@ -240,6 +244,8 @@ def analyze_binary(
     click.echo(f"Single-file bundle: {info.is_single_file_bundle}")
     if info.bundle_file_count is not None:
         click.echo(f"Bundle files: {info.bundle_file_count}")
+    if info.is_single_file_bundle:
+        click.echo(f"Managed assemblies in bundle: {info.has_managed_assemblies}")
     if info.has_clr:
         click.echo(f"CLR header: {info.has_clr}")
 

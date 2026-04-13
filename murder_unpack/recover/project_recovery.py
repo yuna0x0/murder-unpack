@@ -11,7 +11,8 @@ Recovery includes:
 - Localization CSV files for each language
 - All resource files and directories (atlas, fonts, shaders, sounds, images, video, fmod, icons)
 - C# project scaffold (.sln, .csproj, Program.cs) matching hellomurder template
-- Auto-generated C# stubs for game-specific types
+- Full C# decompilation from managed assemblies (when available)
+- Fallback: auto-generated C# stubs for game-specific types (NativeAOT games)
 - editor_config auto-created by Murder editor on first run
 """
 
@@ -48,6 +49,7 @@ def recover_project(
     engine_path: Path | str | None = None,
     skip_engine: bool = False,
     generate_stubs_flag: bool = True,
+    decompile_timeout: int = 600,
 ) -> None:
     """Recover a Murder Engine game export into an editor-openable project.
 
@@ -59,6 +61,7 @@ def recover_project(
         engine_path: Path to existing engine clone (instead of cloning)
         skip_engine: Don't clone/copy engine
         generate_stubs_flag: Generate C# stubs for game-specific types
+        decompile_timeout: Timeout in seconds for ilspycmd decompilation
     """
     game_dir = Path(game_dir)
     output_dir = Path(output_dir)
@@ -158,12 +161,14 @@ def recover_project(
     # It uses Game.Data.GameDirectory (= IMurderGame.Name) to compute paths.
     # No need to pre-create it.
 
-    # Step 11: Generate C# stubs for game-specific types
+    # Step 11: Recover C# source — decompile managed assemblies or generate stubs
     if generate_stubs_flag:
-        stubs_dir = game_src_dir / "Generated"
-        click.echo("Generating C# stubs for game-specific types...")
-        stub_count = generate_stubs(db, stubs_dir)
-        click.echo(f"  Generated {stub_count} stub classes")
+        decompiled = _try_decompile_game(game_dir, game_src_dir, decompile_timeout)
+        if not decompiled:
+            stubs_dir = game_src_dir / "Generated"
+            click.echo("Generating C# stubs for game-specific types...")
+            stub_count = generate_stubs(db, stubs_dir)
+            click.echo(f"  Generated {stub_count} stub classes")
 
     # Step 12: Reconstruct .gum dialogue scripts
     click.echo("Reconstructing .gum dialogue scripts...")
@@ -183,6 +188,124 @@ def recover_project(
         click.echo(f"  Or: dotnet build -r win-x64 && run the x64 exe from bin/Debug/net8.0/win-x64/")
     else:
         click.echo(f"  To open in editor: cd {output_dir}/src/{game_name}.Editor && dotnet run")
+
+
+def _find_game_executable(game_dir: Path) -> Path | None:
+    """Find the Murder Engine game executable in the game directory.
+
+    Murder Engine exports place the game executable at the root of the
+    game directory alongside resources/, DLLs (FNA3D, FAudio, SDL3), etc.
+    """
+    # Known Murder Engine support DLLs — not the game executable
+    skip_prefixes = ("FNA", "FAudio", "SDL", "fmod", "libsteam_api", "steam_api", "libtheorafile")
+
+    # Windows: look for .exe
+    for exe in game_dir.glob("*.exe"):
+        if not exe.stem.startswith(skip_prefixes):
+            return exe
+
+    # Linux: ELF binary (no extension, \x7fELF magic)
+    for f in game_dir.iterdir():
+        if f.is_file() and f.suffix == "":
+            try:
+                if f.read_bytes()[:4] == b"\x7fELF":
+                    return f
+            except (OSError, PermissionError):
+                continue
+
+    # macOS: Mach-O binary (no extension or inside .app bundle)
+    macho_magic = {b"\xcf\xfa\xed\xfe", b"\xfe\xed\xfa\xcf",
+                   b"\xca\xfe\xba\xbe", b"\xbe\xba\xfe\xca"}
+    for f in game_dir.iterdir():
+        if f.is_file() and f.suffix == "":
+            try:
+                if f.read_bytes()[:4] in macho_magic:
+                    return f
+            except (OSError, PermissionError):
+                continue
+
+    return None
+
+
+def _try_decompile_game(game_dir: Path, game_src_dir: Path, timeout: int = 600) -> bool:
+    """Try to decompile the game executable if it contains managed assemblies.
+
+    Returns True if decompilation succeeded and source was placed in the project.
+    Falls back to stub generation (returns False) if:
+    - No game executable found
+    - Binary is NativeAOT (no managed IL to decompile)
+    - ilspycmd is not installed
+    - Decompilation fails or times out
+    """
+    from murder_unpack.binary.bundle_extractor import extract_bundle
+    from murder_unpack.binary.decompiler import (
+        decompile_assembly,
+        find_game_assembly,
+        is_ilspycmd_available,
+    )
+    from murder_unpack.binary.detect import detect_binary
+
+    exe_path = _find_game_executable(game_dir)
+    if exe_path is None:
+        click.echo("Analyzing game binary... no executable found")
+        return False
+
+    click.echo(f"Analyzing game binary ({exe_path.name})...")
+    info = detect_binary(exe_path)
+    click.echo(f"  Format: {info.exe_format.value}, Deployment: {info.deployment.value}")
+
+    if info.is_native_aot:
+        click.echo("  Binary is NativeAOT — managed IL not available, using stubs")
+        return False
+
+    if not info.is_single_file_bundle and not info.has_clr:
+        click.echo("  No managed assemblies detected, using stubs")
+        return False
+
+    if not is_ilspycmd_available():
+        click.echo("  ilspycmd not found — install with: dotnet tool install -g ilspycmd")
+        click.echo("  Falling back to stub generation")
+        return False
+
+    # Extract assemblies from single-file bundle
+    if info.is_single_file_bundle:
+        extract_dir = game_src_dir / ".extracted-assemblies"
+        click.echo("Extracting assemblies from single-file bundle...")
+        extracted = extract_bundle(exe_path, extract_dir)
+        click.echo(f"  Extracted {len(extracted)} files")
+        assemblies_dir = extract_dir
+    else:
+        assemblies_dir = exe_path.parent
+
+    # Find the game assembly
+    game_dll = find_game_assembly(assemblies_dir)
+    if game_dll is None:
+        click.echo("  No game assembly found among extracted files")
+        return False
+
+    click.echo(f"Decompiling {game_dll.name}...")
+    decompiled_dir = game_src_dir / "Decompiled"
+    success = decompile_assembly(
+        game_dll, decompiled_dir,
+        reference_dir=assemblies_dir,
+        as_project=False,
+        timeout=timeout,
+    )
+
+    if not success:
+        click.echo("  Decompilation failed — falling back to stub generation")
+        # Clean up failed decompilation output
+        if decompiled_dir.exists():
+            shutil.rmtree(decompiled_dir)
+        return False
+
+    # Clean up extracted assemblies (no longer needed)
+    if info.is_single_file_bundle:
+        extract_dir = game_src_dir / ".extracted-assemblies"
+        if extract_dir.exists():
+            shutil.rmtree(extract_dir)
+
+    return True
 
 
 def _patch_engine(output_dir: Path) -> None:

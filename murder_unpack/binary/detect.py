@@ -42,6 +42,7 @@ class BinaryInfo:
     has_clr: bool = False
     is_native_aot: bool = False
     is_single_file_bundle: bool = False
+    has_managed_assemblies: bool = False
     bundle_offset: int | None = None
     bundle_file_count: int | None = None
 
@@ -135,10 +136,18 @@ def detect_binary(path: Path | str) -> BinaryInfo:
     """Detect .NET deployment format of a game executable.
 
     Works with Windows PE (.exe), Linux ELF, and macOS Mach-O binaries.
-    A binary can be both NativeAOT AND a single-file bundle (NativeAOT
-    published as single-file), so both flags are set independently.
-    The primary deployment type reflects the most specific classification.
+
+    Detection logic:
+    - Single-file bundles are identified by the bundle signature and parsed
+      to check whether they contain managed assemblies (FileType.ASSEMBLY).
+    - NativeAOT markers (RhpNewFast, etc.) can false-positive when the
+      bundled coreclr.dll contains those strings. A single-file bundle
+      with managed assemblies is NOT NativeAOT — the managed IL is intact.
+    - True NativeAOT binaries have no managed assemblies in the bundle
+      (or no bundle at all).
     """
+    from murder_unpack.binary.bundle_extractor import FileType, parse_bundle
+
     path = Path(path)
     data = path.read_bytes()
 
@@ -155,24 +164,23 @@ def detect_binary(path: Path | str) -> BinaryInfo:
     if exe_format == ExeFormat.PE:
         info.has_clr = _check_pe_clr(data)
 
-    # Check for NativeAOT markers (independent flag)
-    info.is_native_aot = _check_nativeaot(data)
+    # Check for single-file bundle (any platform — format is appended
+    # identically to PE, ELF, and Mach-O host executables)
+    manifest = parse_bundle(data)
+    if manifest is not None:
+        info.is_single_file_bundle = True
+        info.bundle_file_count = len(manifest.entries)
+        info.bundle_offset = manifest.entries[0].offset if manifest.entries else None
+        info.has_managed_assemblies = any(
+            e.file_type == FileType.ASSEMBLY for e in manifest.entries
+        )
 
-    # Check for single-file bundle (independent flag, any platform)
-    sig_pos = _find_bundle_signature(data)
-    if sig_pos is not None:
-        try:
-            manifest_offset = struct.unpack_from("<Q", data, sig_pos - 8)[0]
-            if 0 < manifest_offset < len(data):
-                info.is_single_file_bundle = True
-                info.bundle_offset = manifest_offset
-                pos = manifest_offset
-                _major = struct.unpack_from("<I", data, pos)[0]
-                _minor = struct.unpack_from("<I", data, pos + 4)[0]
-                file_count = struct.unpack_from("<I", data, pos + 8)[0]
-                info.bundle_file_count = file_count
-        except (struct.error, IndexError):
-            pass
+    # NativeAOT detection: string markers in the binary, but ONLY trust
+    # them if the bundle does NOT contain managed assemblies. A managed
+    # single-file bundle embeds coreclr which contains these same strings.
+    has_aot_markers = _check_nativeaot(data)
+    if has_aot_markers and not info.has_managed_assemblies:
+        info.is_native_aot = True
 
     # Determine primary deployment type
     if info.is_native_aot:
