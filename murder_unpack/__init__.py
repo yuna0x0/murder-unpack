@@ -1,3 +1,3 @@
 """Murder Engine game unpacker, recovery, and modding toolkit."""
 
-__version__ = "0.1.4"
+__version__ = "0.1.5"
