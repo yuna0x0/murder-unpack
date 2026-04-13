@@ -271,6 +271,28 @@ def _patch_engine(output_dir: Path) -> None:
             entity_path.write_text(entity_src, encoding="utf-8")
             click.echo("  Patched engine: Entity array resize and component requirement checks")
 
+    # Patch GameLogger.Error to not force the debug console open.
+    # The console uses ImGui.SetWindowFocus() every frame when visible,
+    # which steals focus from all other windows. Error spam from
+    # rendering (invalid batches, missing components) makes the editor
+    # unresponsive because the console keeps stealing focus.
+    logger_path = output_dir / "murder/src/Murder/Diagnostics/GameLogger.cs"
+    if logger_path.exists():
+        logger_src = logger_path.read_text(encoding="utf-8")
+        old_show = (
+            "        OutputToLog(outputMessage, LogType.Error, new Vector4(1, 0.25f, 0.5f, 1));\n"
+            "        _scrollToBottom = 2;\n"
+            "        _showDebug = true;"
+        )
+        new_show = (
+            "        OutputToLog(outputMessage, LogType.Error, new Vector4(1, 0.25f, 0.5f, 1));\n"
+            "        _scrollToBottom = 2;"
+        )
+        if old_show in logger_src:
+            logger_src = logger_src.replace(old_show, new_show)
+            logger_path.write_text(logger_src, encoding="utf-8")
+            click.echo("  Patched engine: Error logging no longer forces console open")
+
 
 def _detect_game_name(game_config: dict[str, Any]) -> str:
     """Fallback game name detection from game_config Name field."""
