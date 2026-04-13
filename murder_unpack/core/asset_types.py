@@ -47,8 +47,12 @@ _TYPE_MAP: dict[str, tuple[str, str]] = {
     "Murder.Assets.InputGraphicsAsset": ("data", "Ui"),
     # GameProfile is special — stored at root
     "Murder.Assets.GameProfile": ("", ""),
-    "Road.Assets.RoadGameProfile": ("", ""),
 }
+
+
+def is_game_profile_type(type_name: str) -> bool:
+    """Check if a type is a GameProfile (engine or game-specific subclass)."""
+    return type_name == "Murder.Assets.GameProfile" or type_name.endswith("GameProfile")
 
 
 def get_asset_directory(asset: dict[str, Any]) -> str:
@@ -57,6 +61,10 @@ def get_asset_directory(asset: dict[str, Any]) -> str:
     Returns a path like "assets/data/Fonts" or "assets/ecs/World".
     """
     type_name = asset.get("$type", "")
+
+    # GameProfile subclasses (game-specific) — stored at root
+    if is_game_profile_type(type_name):
+        return ""
 
     # Check known type mapping
     if type_name in _TYPE_MAP:

@@ -11,8 +11,11 @@ Recovery includes:
 - Localization CSV files for each language
 - All resource files and directories (atlas, fonts, shaders, sounds, images, video, fmod, icons)
 - C# project scaffold (.sln, .csproj, Program.cs) matching hellomurder template
-- Full C# decompilation from managed assemblies (when available)
+- Full C# decompilation via bundled per-type decompiler (managed single-file bundles)
 - Fallback: auto-generated C# stubs for game-specific types (NativeAOT games)
+- Decompiler compat: init→set (trial-build-targeted), readonly removal, JsonStringEnumConverter
+- Per-game fixes via auto-detected fix registry
+- GetAsset crash prevention (both modes), stub-only patches for missing types
 - editor_config auto-created by Murder editor on first run
 """
 
@@ -50,6 +53,7 @@ def recover_project(
     skip_engine: bool = False,
     generate_stubs_flag: bool = True,
     decompile_timeout: int = 600,
+    game_fix_id: str | None = None,
 ) -> None:
     """Recover a Murder Engine game export into an editor-openable project.
 
@@ -61,7 +65,8 @@ def recover_project(
         engine_path: Path to existing engine clone (instead of cloning)
         skip_engine: Don't clone/copy engine
         generate_stubs_flag: Generate C# stubs for game-specific types
-        decompile_timeout: Timeout in seconds for ilspycmd decompilation
+        decompile_timeout: Timeout in seconds for C# decompilation
+        game_fix_id: Per-game fix ID (auto-detected if None, "none" to skip)
     """
     game_dir = Path(game_dir)
     output_dir = Path(output_dir)
@@ -102,53 +107,48 @@ def recover_project(
             clone_engine(output_dir, engine_version)
             click.echo("  Engine cloned with submodules")
 
-    # Step 3: Patch engine for recovery compatibility
-    _patch_engine(output_dir)
-
-    # Step 4: Create project scaffold
+    # Step 3: Create project scaffold
     click.echo("Generating project scaffold...")
     generate_solution(output_dir, game_name)
 
-    # Step 4b: Handle ARM64 Windows — Murder.FNA has no ARM64 native libs
+    # Step 3b: Handle ARM64 Windows — Murder.FNA has no ARM64 native libs
     if is_arm64_windows():
         click.echo("Detected ARM64 Windows — configuring x64 build workaround...")
         setup_arm64_workaround(output_dir)
         check_arm64_readiness(output_dir)
 
-    # Step 5: Set up resource directories
+    # Step 4: Set up resource directories
     game_src_dir = output_dir / "src" / game_name
     resources_dir = game_src_dir / "resources"
     resources_dir.mkdir(parents=True, exist_ok=True)
 
-    # Step 6: Detect original assembly name and remap if needed
+    # Step 5: Detect original assembly name and remap if needed
     assembly_remap = None
     original_assembly = detect_game_assembly(db)
     if original_assembly and original_assembly != game_name:
         assembly_remap = (original_assembly, game_name)
         click.echo(f"  Remapping assembly: {original_assembly} → {game_name}")
 
-    # Step 7: Split packed assets into individual .json files
+    # Step 6: Split packed assets into individual .json files
     click.echo("Splitting packed assets into individual files...")
     counts = split_assets(db, resources_dir, assembly_remap=assembly_remap)
     total_written = sum(counts.values())
     click.echo(f"  Wrote {total_written} asset files across {len(counts)} directories")
 
-    # Step 8: Copy game_config
+    # Step 7: Copy game_config (type remapping deferred to after decompilation)
     src_config = game_dir / "resources" / "game_config"
     if src_config.exists():
         config = load_json(src_config)
-        if config.get("$type") == "Road.Assets.RoadGameProfile":
-            config["$type"] = "Murder.Assets.GameProfile"
         if assembly_remap:
             config = remap_assembly_names(config, *assembly_remap)
         save_json(config, resources_dir / "game_config")
         click.echo("  Copied game_config")
 
-    # Step 9: Copy ALL resource directories
+    # Step 8: Copy ALL resource directories
     click.echo("Copying resource files...")
     _copy_resources(game_dir, resources_dir)
 
-    # Step 10: Copy packed data (for game runtime)
+    # Step 9: Copy packed data (for game runtime)
     packed_dir = game_src_dir / "packed" / "content"
     packed_dir.mkdir(parents=True, exist_ok=True)
     content_dir = game_dir / "resources" / "content"
@@ -161,7 +161,8 @@ def recover_project(
     # It uses Game.Data.GameDirectory (= IMurderGame.Name) to compute paths.
     # No need to pre-create it.
 
-    # Step 11: Recover C# source — decompile managed assemblies or generate stubs
+    # Step 10: Recover C# source — decompile managed assemblies or generate stubs
+    decompiled = False
     if generate_stubs_flag:
         decompiled = _try_decompile_game(game_dir, game_src_dir, decompile_timeout)
         if not decompiled:
@@ -170,7 +171,32 @@ def recover_project(
             stub_count = generate_stubs(db, stubs_dir)
             click.echo(f"  Generated {stub_count} stub classes")
 
-    # Step 12: Reconstruct .gum dialogue scripts
+    # Step 11: Mode-specific setup
+    if decompiled:
+        _use_decompiled_game_class(output_dir, game_name, db)
+        added = _add_nuget_packages(game_src_dir, game_name)
+        if added:
+            click.echo(f"  Added NuGet packages: {', '.join(added)}")
+        count = _fix_init_from_build_errors(output_dir, game_name)
+        if count:
+            click.echo(f"  Decompiler compat: init→set in {count} engine files")
+    else:
+        _remap_game_config_type(resources_dir)
+        _patch_engine(output_dir)
+
+    # Always patch GetAsset to warn instead of throw on missing assets.
+    # Needed in both modes: stubs have incomplete types, decompiled projects
+    # may have fresh/empty preferences with uninitialized GUIDs.
+    _patch_getasset(output_dir)
+
+    # Step 12: Apply per-game decompiler fixes
+    if decompiled:
+        _apply_game_fixes(
+            db, game_dir, game_src_dir / "Decompiled",
+            game_fix_id, assembly_name=detect_game_assembly(db),
+        )
+
+    # Step 13: Reconstruct .gum dialogue scripts
     click.echo("Reconstructing .gum dialogue scripts...")
     raw_resources_dir = output_dir / "resources"
     raw_resources_dir.mkdir(exist_ok=True)
@@ -188,6 +214,43 @@ def recover_project(
         click.echo(f"  Or: dotnet build -r win-x64 && run the x64 exe from bin/Debug/net8.0/win-x64/")
     else:
         click.echo(f"  To open in editor: cd {output_dir}/src/{game_name}.Editor && dotnet run")
+
+
+def _apply_game_fixes(
+    db: GameDatabase,
+    game_dir: Path,
+    decompiled_dir: Path,
+    game_fix_id: str | None,
+    assembly_name: str | None = None,
+) -> None:
+    """Detect and apply per-game decompiler fixes."""
+    if game_fix_id == "none":
+        return
+    if not decompiled_dir.is_dir():
+        return
+
+    from murder_unpack.fixes import get_registry
+    registry = get_registry()
+
+    if game_fix_id:
+        fix = registry.get(game_fix_id)
+        if not fix:
+            click.echo(f"  Unknown game fix: {game_fix_id}")
+            available = ", ".join(f.id for f in registry.list_all())
+            if available:
+                click.echo(f"  Available: {available}")
+            return
+    else:
+        fix = registry.detect(
+            db=db, game_dir=game_dir, assembly_name=assembly_name,
+        )
+
+    if fix:
+        count = fix.apply(decompiled_dir)
+        if count:
+            click.echo(f"  Applied game fix '{fix.id}': {count} files patched")
+    else:
+        click.echo("  No per-game fixes detected (use --game-fix to specify)")
 
 
 def _find_game_executable(game_dir: Path) -> Path | None:
@@ -230,17 +293,16 @@ def _find_game_executable(game_dir: Path) -> Path | None:
 def _try_decompile_game(game_dir: Path, game_src_dir: Path, timeout: int = 600) -> bool:
     """Try to decompile the game executable if it contains managed assemblies.
 
-    Returns True if decompilation succeeded and source was placed in the project.
-    Falls back to stub generation (returns False) if:
-    - No game executable found
-    - Binary is NativeAOT (no managed IL to decompile)
-    - ilspycmd is not installed
-    - Decompilation fails or times out
+    Uses bundled decompile-helper (per-type decompilation with timeouts) as
+    the primary method. Falls back to ilspycmd if the helper can't be built.
+    Returns False (triggering stub generation) if all methods fail.
     """
     from murder_unpack.binary.bundle_extractor import extract_bundle
     from murder_unpack.binary.decompiler import (
         decompile_assembly,
+        decompile_with_helper,
         find_game_assembly,
+        is_dotnet_available,
         is_ilspycmd_available,
     )
     from murder_unpack.binary.detect import detect_binary
@@ -262,8 +324,8 @@ def _try_decompile_game(game_dir: Path, game_src_dir: Path, timeout: int = 600) 
         click.echo("  No managed assemblies detected, using stubs")
         return False
 
-    if not is_ilspycmd_available():
-        click.echo("  ilspycmd not found — install with: dotnet tool install -g ilspycmd")
+    if not is_dotnet_available():
+        click.echo("  dotnet SDK not found — required for decompilation")
         click.echo("  Falling back to stub generation")
         return False
 
@@ -285,16 +347,29 @@ def _try_decompile_game(game_dir: Path, game_src_dir: Path, timeout: int = 600) 
 
     click.echo(f"Decompiling {game_dll.name}...")
     decompiled_dir = game_src_dir / "Decompiled"
-    success = decompile_assembly(
+
+    # Primary: bundled decompile-helper (per-type, reliable on large assemblies)
+    success = decompile_with_helper(
         game_dll, decompiled_dir,
         reference_dir=assemblies_dir,
-        as_project=False,
-        timeout=timeout,
+        per_type_timeout=30,
+        total_timeout=timeout,
     )
+
+    # Fallback: ilspycmd (whole-assembly, may hang on large DLLs)
+    if not success and is_ilspycmd_available():
+        click.echo("  Retrying with ilspycmd...")
+        if decompiled_dir.exists():
+            shutil.rmtree(decompiled_dir)
+        success = decompile_assembly(
+            game_dll, decompiled_dir,
+            reference_dir=assemblies_dir,
+            as_project=False,
+            timeout=timeout,
+        )
 
     if not success:
         click.echo("  Decompilation failed — falling back to stub generation")
-        # Clean up failed decompilation output
         if decompiled_dir.exists():
             shutil.rmtree(decompiled_dir)
         return False
@@ -308,6 +383,43 @@ def _try_decompile_game(game_dir: Path, game_src_dir: Path, timeout: int = 600) 
     return True
 
 
+def _patch_getasset(output_dir: Path) -> None:
+    """Patch GetAsset to warn instead of throw on missing assets.
+
+    Missing assets can occur in any recovery mode: stubs have incomplete types,
+    decompiled projects may have fresh preferences with uninitialized GUIDs.
+    Throwing propagates through ImGui draw code and causes native crashes.
+    """
+    gdm_path = output_dir / "murder/src/Murder/Data/GameDataManager.cs"
+    if not gdm_path.exists():
+        return
+    gdm_src = gdm_path.read_text(encoding="utf-8")
+
+    old_generic = 'throw new ArgumentException($"Unable to find the asset of type {typeof(T).Name} with id: {id} in database.");'
+    new_generic = (
+        'GameLogger.Warning($"Unable to find the asset of type {typeof(T).Name} with id: {id} in database.");\n'
+        '            try { return System.Activator.CreateInstance<T>(); } catch { }\n'
+        '            return default!;'
+    )
+
+    old_nongeneric = 'throw new ArgumentException($"Unable to find the asset with id: {id} in database.");'
+    new_nongeneric = (
+        'GameLogger.Warning($"Unable to find the asset with id: {id} in database.");\n'
+        '            return default!;'
+    )
+
+    patched = False
+    if old_generic in gdm_src:
+        gdm_src = gdm_src.replace(old_generic, new_generic)
+        patched = True
+    if old_nongeneric in gdm_src:
+        gdm_src = gdm_src.replace(old_nongeneric, new_nongeneric)
+        patched = True
+    if patched:
+        gdm_path.write_text(gdm_src, encoding="utf-8")
+        click.echo("  Patched engine: GetAsset warns instead of throwing")
+
+
 def _patch_engine(output_dir: Path) -> None:
     """Apply compatibility patches to the Murder engine for recovered projects.
 
@@ -318,7 +430,7 @@ def _patch_engine(output_dir: Path) -> None:
     """
     # Patch JsonTypeConverter to return typeof(object) instead of throwing
     # when a type can't be resolved. This is the root cause of most
-    # deserialization failures — game-specific types like Road.Systems.*
+    # deserialization failures — game-specific types not in the project
     # throw JsonException, killing the entire asset load.
     jtc_path = output_dir / "murder/src/Murder/Utilities/Serialization/JsonTypeConverter.cs"
     if jtc_path.exists():
@@ -341,38 +453,6 @@ def _patch_engine(output_dir: Path) -> None:
                 )
             jtc_path.write_text(jtc_src, encoding="utf-8")
             click.echo("  Patched engine: JsonTypeConverter gracefully handles missing types")
-
-    # Patch GetAsset to return empty placeholders instead of throwing.
-    # Even with better deserialization, some assets may still not load.
-    # Throwing here propagates through ImGui draw code, corrupting its
-    # Begin/End state stack and causing native SEGV.
-    gdm_path = output_dir / "murder/src/Murder/Data/GameDataManager.cs"
-    if gdm_path.exists():
-        gdm_src = gdm_path.read_text(encoding="utf-8")
-
-        old_generic = 'throw new ArgumentException($"Unable to find the asset of type {typeof(T).Name} with id: {id} in database.");'
-        new_generic = (
-            'GameLogger.Warning($"Unable to find the asset of type {typeof(T).Name} with id: {id} in database.");\n'
-            '            try { return System.Activator.CreateInstance<T>(); } catch { }\n'
-            '            return default!;'
-        )
-
-        old_nongeneric = 'throw new ArgumentException($"Unable to find the asset with id: {id} in database.");'
-        new_nongeneric = (
-            'GameLogger.Warning($"Unable to find the asset with id: {id} in database.");\n'
-            '            return default!;'
-        )
-
-        patched = False
-        if old_generic in gdm_src:
-            gdm_src = gdm_src.replace(old_generic, new_generic)
-            patched = True
-        if old_nongeneric in gdm_src:
-            gdm_src = gdm_src.replace(old_nongeneric, new_nongeneric)
-            patched = True
-        if patched:
-            gdm_path.write_text(gdm_src, encoding="utf-8")
-            click.echo("  Patched engine: GetAsset returns placeholders for missing assets")
 
     # Patch Entity.cs — two fixes:
     # 1. Array resize for large component indices
@@ -482,11 +562,9 @@ def export_localization_csv(db: GameDatabase, output_dir: Path) -> int:
     """
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Build speaker name lookup
+    # Build speaker name lookup — matches any SpeakerAsset type
     speaker_names: dict[str, str] = {}
-    for s in db.get_by_type("Road.Assets.RoadSpeakerAsset"):
-        speaker_names[s.get("Guid", "")] = s.get("Name", "")
-    for s in db.get_by_type("Murder.Assets.Dialogs.SpeakerAsset"):
+    for s in db.get_by_type_suffix("SpeakerAsset"):
         speaker_names[s.get("Guid", "")] = s.get("Name", "")
 
     # Build CharacterAsset name lookup
@@ -544,6 +622,218 @@ def export_localization_csv(db: GameDatabase, output_dir: Path) -> int:
     return count
 
 
+def _use_decompiled_game_class(
+    output_dir: Path, game_name: str, db: GameDatabase,
+) -> None:
+    """Replace scaffold game class with the decompiled one.
+
+    The scaffold generates a minimal IMurderGame stub. With full decompilation,
+    the real game class has CreateRenderContext, Profile casts,
+    and other overrides the editor needs at runtime.
+    """
+    game_src_dir = output_dir / "src" / game_name
+    decompiled_dir = game_src_dir / "Decompiled"
+
+    # Find the decompiled IMurderGame implementation
+    import re
+    game_class = None
+    game_ns = None
+    game_class_file = None
+    for cs_file in decompiled_dir.rglob("*.cs"):
+        try:
+            src = cs_file.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        # Look for `class X : IMurderGame` (the real game class, not the scaffold)
+        m = re.search(r'class\s+(\w+)\s*:\s*IMurderGame', src)
+        if m:
+            game_class = m.group(1)
+            ns_match = re.search(r'namespace\s+([\w.]+)', src)
+            game_ns = ns_match.group(1) if ns_match else ""
+            game_class_file = cs_file
+            break
+
+    if not game_class:
+        return
+
+    click.echo(f"  Using decompiled game class: {game_ns}.{game_class}")
+
+    # Remove scaffold game class
+    stub_game = game_src_dir / f"{game_name}Game.cs"
+    if stub_game.exists():
+        stub_game.unlink()
+
+    # Rewire architect to extend decompiled game class
+    editor_dir = output_dir / "src" / f"{game_name}.Editor"
+    architect_path = editor_dir / f"{game_name}Architect.cs"
+    if architect_path.exists():
+        using = f"using {game_ns};\n" if game_ns else ""
+        architect_path.write_text(
+            f"{using}using Murder.Editor;\n\n"
+            f"namespace {game_name}.Editor;\n\n"
+            f"public class {game_name}Architect : {game_class}, IMurderArchitect\n"
+            f"{{\n}}\n",
+            encoding="utf-8",
+        )
+
+    # Update Program.cs to use the architect
+    program_path = editor_dir / "Program.cs"
+    if program_path.exists():
+        program_path.write_text(
+            f"using Murder.Editor;\n\n"
+            f"namespace {game_name}.Editor;\n\n"
+            f"public static class Program\n"
+            f"{{\n"
+            f"    [STAThread]\n"
+            f"    static void Main()\n"
+            f"    {{\n"
+            f"        using var editor = new Architect(new {game_name}Architect());\n"
+            f"        editor.Run();\n"
+            f"    }}\n"
+            f"}}\n",
+            encoding="utf-8",
+        )
+
+
+def _remap_game_config_type(resources_dir: Path) -> None:
+    """Remap game_config $type to Murder.Assets.GameProfile for stub mode.
+
+    Stub mode doesn't have the game's custom GameProfile subclass, so we
+    remap to the base class that the engine can deserialize.
+    """
+    config_path = resources_dir / "game_config"
+    if not config_path.exists():
+        return
+    config = load_json(config_path)
+    original_type = config.get("$type", "")
+    if original_type and original_type != "Murder.Assets.GameProfile":
+        config["$type"] = "Murder.Assets.GameProfile"
+        save_json(config, config_path)
+
+
+def _fix_init_from_build_errors(
+    output_dir: Path, game_name: str,
+) -> int:
+    """Fix init→set in engine files by doing a trial build and parsing errors.
+
+    Only modifies engine files that actually cause CS8852 errors from the
+    decompiled code. This avoids unnecessary changes to engine files that
+    the decompiled code never touches.
+
+    Returns the number of engine files fixed.
+    """
+    import re
+    import subprocess
+
+    editor_dir = output_dir / "src" / f"{game_name}.Editor"
+    engine_dir = output_dir / "murder"
+
+    # Trial build — capture CS8852 errors
+    click.echo("  Trial build to detect init→set targets...")
+    result = subprocess.run(
+        ["dotnet", "build", "--nologo", "-v", "quiet"],
+        cwd=str(editor_dir),
+        capture_output=True, text=True, timeout=300,
+    )
+
+    # Parse CS8852 errors to find affected property names
+    # Format: "Init-only property or indexer 'TypeName.PropName' can only..."
+    prop_pattern = re.compile(
+        r"Init-only property or indexer '([^']+)'"
+    )
+    affected_props: set[str] = set()
+    for line in result.stdout.splitlines() + result.stderr.splitlines():
+        if "CS8852" in line:
+            m = prop_pattern.search(line)
+            if m:
+                affected_props.add(m.group(1))
+
+    if not affected_props:
+        return 0
+
+    # Map property names to type names (e.g. "AgentSpriteComponent.YSortOffset" → "AgentSpriteComponent")
+    affected_types = {p.rsplit(".", 1)[0].split(".")[-1] for p in affected_props}
+    click.echo(f"  Found {len(affected_types)} engine types needing init→set")
+
+    # Find engine source files for these types and apply init→set
+    init_pattern = re.compile(r'\binit\s*;')
+    readonly_struct_pattern = re.compile(r'\breadonly\s+(record\s+)?struct\b')
+    readonly_prop_pattern = re.compile(
+        r'(\bpublic\s+)readonly(\s+.+?\s*\{[^}]*\bset\b)'
+    )
+
+    count = 0
+    search_dirs = [engine_dir / "src"]
+    for subdir in ("bang", "gum"):
+        sub_src = engine_dir / subdir / "src"
+        if sub_src.is_dir():
+            search_dirs.append(sub_src)
+
+    for src_dir in search_dirs:
+        if not src_dir.is_dir():
+            continue
+        for cs_file in src_dir.rglob("*.cs"):
+            # Only process files that define one of the affected types
+            stem = cs_file.stem
+            # Quick check: file name often matches type name
+            if not any(t in stem or stem in t for t in affected_types):
+                # Slower check: read file and look for type declarations
+                try:
+                    src = cs_file.read_text(encoding="utf-8")
+                except (OSError, UnicodeDecodeError):
+                    continue
+                if not any(
+                    re.search(rf'\b(class|struct|record)\s+{re.escape(t)}\b', src)
+                    for t in affected_types
+                ):
+                    continue
+            else:
+                try:
+                    src = cs_file.read_text(encoding="utf-8")
+                except (OSError, UnicodeDecodeError):
+                    continue
+
+            if not init_pattern.search(src):
+                continue
+
+            new_src = init_pattern.sub("set;", src)
+            new_src = readonly_struct_pattern.sub(
+                lambda m: f"{'record ' if m.group(1) else ''}struct", new_src,
+            )
+            new_src = readonly_prop_pattern.sub(r'\1\2', new_src)
+
+            if new_src != src:
+                cs_file.write_text(new_src, encoding="utf-8")
+                count += 1
+
+    # Suppress BANG analyzer errors for the affected files
+    if count > 0:
+        _suppress_init_warnings(engine_dir)
+
+    return count
+
+
+def _suppress_init_warnings(engine_dir: Path) -> None:
+    """Add <NoWarn> for init→set side effects to the engine Directory.Build.props.
+
+    Changing init→set on readonly structs triggers unsuppressable CS8341/CS8659.
+    Removing readonly triggers BANG analyzer errors (BANG0002/3002/5002).
+    These are all compile-time-only constraints with no runtime impact.
+    """
+    dbp = engine_dir / "Directory.Build.props"
+    if not dbp.exists():
+        return
+    src = dbp.read_text(encoding="utf-8")
+    if "BANG0002" in src:
+        return  # already patched
+    src = src.replace(
+        "</PropertyGroup>",
+        "  <NoWarn>$(NoWarn);BANG0002;BANG3002;BANG5002</NoWarn>\n  </PropertyGroup>",
+        1,
+    )
+    dbp.write_text(src, encoding="utf-8")
+
+
 def _csv_escape(value: str) -> str:
     """Escape a value for CSV output."""
     if not value:
@@ -551,3 +841,53 @@ def _csv_escape(value: str) -> str:
     if "," in value or '"' in value or "\n" in value:
         return '"' + value.replace('"', '""') + '"'
     return value
+
+
+# Known third-party namespaces → NuGet package names.
+# Extend this map as more Murder Engine games are recovered.
+_USING_TO_NUGET: dict[str, str] = {
+    "using Steamworks;": "Steamworks.NET",
+}
+
+
+def _add_nuget_packages(game_src_dir: Path, game_name: str) -> list[str]:
+    """Scan decompiled source for third-party using directives and add NuGet refs.
+
+    Returns list of package names that were added.
+    """
+    decompiled_dir = game_src_dir / "Decompiled"
+    if not decompiled_dir.is_dir():
+        return []
+
+    # Scan all .cs files for known third-party usings
+    needed: set[str] = set()
+    for cs_file in decompiled_dir.rglob("*.cs"):
+        try:
+            src = cs_file.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        for using_stmt, package in _USING_TO_NUGET.items():
+            if using_stmt in src:
+                needed.add(package)
+
+    if not needed:
+        return []
+
+    # Insert PackageReference items into the .csproj
+    csproj_path = game_src_dir / f"{game_name}.csproj"
+    if not csproj_path.exists():
+        return []
+
+    csproj = csproj_path.read_text(encoding="utf-8")
+
+    pkg_lines = "\n".join(
+        f'    <PackageReference Include="{pkg}" Version="*" />'
+        for pkg in sorted(needed)
+    )
+    pkg_group = f"\n  <ItemGroup>\n{pkg_lines}\n  </ItemGroup>\n"
+
+    # Insert before the closing </Project>
+    csproj = csproj.replace("</Project>", f"{pkg_group}</Project>")
+    csproj_path.write_text(csproj, encoding="utf-8")
+
+    return sorted(needed)

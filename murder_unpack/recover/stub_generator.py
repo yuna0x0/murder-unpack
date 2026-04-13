@@ -79,7 +79,7 @@ def _short_type_name(full_type: str) -> str:
     """Convert full C# type name to a safe short name.
 
     Handles generic types like:
-      Bang.Interactions.InteractiveComponent<Road.Interactions.Foo>
+      Bang.Interactions.InteractiveComponent<Game.Interactions.Foo>
       → InteractiveComponent_Foo
     """
     # Strip generic type arguments first, flatten to safe identifier
@@ -163,7 +163,7 @@ def _get_base_class(type_name: str, fields: dict[str, str]) -> str:
 def generate_stubs(
     db: GameDatabase,
     output_dir: Path | str,
-    namespace_filter: str = "Road.",
+    namespace_filter: str | None = None,
 ) -> int:
     """Generate C# stub classes for game-specific types.
 
@@ -171,11 +171,18 @@ def generate_stubs(
         db: Loaded GameDatabase
         output_dir: Output directory for .cs files
         namespace_filter: Only generate stubs for types in this namespace
+                          (auto-detected from game data if None)
 
     Returns:
         Count of generated stub files
     """
     output_dir = Path(output_dir)
+
+    # Auto-detect game namespace if not specified
+    if namespace_filter is None:
+        game_ns = db.game_namespace
+        namespace_filter = f"{game_ns}." if game_ns else ""
+
     schemas = collect_type_schemas(db)
     count = 0
 
@@ -188,7 +195,7 @@ def generate_stubs(
         if len(parts) == 2:
             namespace, class_name = parts
         else:
-            namespace = "Road.Assets"
+            namespace = f"{db.game_namespace or 'Game'}.Assets"
             class_name = parts[0]
 
         base_class = _get_base_class(type_name, fields)

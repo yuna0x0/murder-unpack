@@ -35,3 +35,10 @@ murder-unpack = "murder_unpack.cli:main"
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["murder_unpack"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"murder_unpack/binary/decompile-helper/Program.cs" = "murder_unpack/binary/decompile-helper/Program.cs"
+"murder_unpack/binary/decompile-helper/decompile-helper.csproj" = "murder_unpack/binary/decompile-helper/decompile-helper.csproj"

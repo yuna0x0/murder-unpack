@@ -4,7 +4,7 @@ Murder's dialogue system uses localized string references:
 - CharacterAsset.allSituations → dialogue tree structure
 - Lines[].Text.Id → GUID referencing a localized string
 - LocalizationAsset.resources → GUID → actual text
-- Speaker GUIDs → RoadSpeakerAsset/CharacterAsset for character names
+- Speaker GUIDs → SpeakerAsset/CharacterAsset for character names
 """
 
 from __future__ import annotations
@@ -36,14 +36,9 @@ class LocalizationLookup:
                 if guid and text and guid not in self._strings:
                     self._strings[guid] = text
 
-        # Build speaker name lookup
-        for speaker in db.get_by_type("Road.Assets.RoadSpeakerAsset"):
-            guid = speaker.get("Guid", "")
-            name = speaker.get("Name", "")
-            if guid and name:
-                self._speakers[guid] = name
-
-        for speaker in db.get_by_type("Murder.Assets.Dialogs.SpeakerAsset"):
+        # Build speaker name lookup — matches any SpeakerAsset type
+        # (engine: Murder.Assets.Dialogs.SpeakerAsset, game-specific: *SpeakerAsset)
+        for speaker in db.get_by_type_suffix("SpeakerAsset"):
             guid = speaker.get("Guid", "")
             name = speaker.get("Name", "")
             if guid and name:

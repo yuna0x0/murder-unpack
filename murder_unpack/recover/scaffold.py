@@ -78,6 +78,8 @@ def _write_game_csproj(project_dir: Path, game_name: str) -> None:
     <JsonSerializerIsReflectionEnabledByDefault>false</JsonSerializerIsReflectionEnabledByDefault>
     <ErrorOnDuplicatePublishOutputFiles>false</ErrorOnDuplicatePublishOutputFiles>
     <GeneratorParentAssembly>Murder</GeneratorParentAssembly>
+    <!-- Suppress Bang analyzer style rules for decompiled code -->
+    <NoWarn>BANG0002;BANG3002;BANG5002</NoWarn>
   </PropertyGroup>
 
   <!-- Copy resources and packed data to build output -->

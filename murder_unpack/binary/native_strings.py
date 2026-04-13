@@ -27,9 +27,33 @@ class ExtractedTypes:
                 len(self.interactions) + len(self.other))
 
 
+_ENGINE_ROOTS = {
+    b"Murder", b"Bang", b"Gum", b"System", b"Microsoft", b"MonoGame",
+    b"FNA", b"Newtonsoft", b"Internal", b"Interop", b"Windows",
+}
+
+
+def _detect_namespace_from_binary(data: bytes) -> str:
+    """Auto-detect game namespace from a NativeAOT binary.
+
+    Scans for dotted identifiers like Foo.Bar.Baz and counts root namespaces,
+    excluding known engine/framework roots.
+    """
+    pattern = re.compile(rb"([A-Z][a-zA-Z0-9]{1,30})\.[A-Z][a-zA-Z0-9_.]*(?:Asset|Component|System|Service|StateMachine|Interaction)")
+    counts: dict[bytes, int] = {}
+    for m in pattern.finditer(data):
+        root = m.group(1)
+        if root not in _ENGINE_ROOTS:
+            counts[root] = counts.get(root, 0) + 1
+    if counts:
+        best = max(counts, key=counts.get)
+        return best.decode("ascii") + "."
+    return ""
+
+
 def extract_type_names(
     path: Path | str,
-    namespace_prefix: str = "Road.",
+    namespace_prefix: str = "",
 ) -> ExtractedTypes:
     """Extract .NET type names from a NativeAOT binary.
 
@@ -38,9 +62,14 @@ def extract_type_names(
 
     Args:
         path: Path to the native binary (any platform)
-        namespace_prefix: Namespace prefix to search for (default: "Road.")
+        namespace_prefix: Namespace prefix to search for (auto-detected if empty)
     """
     data = Path(path).read_bytes()
+
+    # Auto-detect game namespace if not specified
+    if not namespace_prefix:
+        namespace_prefix = _detect_namespace_from_binary(data)
+
     pattern = re.compile(
         namespace_prefix.encode("ascii").replace(b".", rb"\.") +
         rb"[A-Za-z_][A-Za-z0-9_.]*"

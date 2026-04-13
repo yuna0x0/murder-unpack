@@ -195,12 +195,14 @@ def decode_qoi(input_path: Path, output_path: Path) -> None:
 @click.option("--game-name", default=None, help="Project name (auto-detected from game assembly)")
 @click.option("--no-stubs", is_flag=True, help="Don't generate C# stubs")
 @click.option("--decompile-timeout", type=int, default=600,
-              help="Timeout in seconds for ilspycmd decompilation (default: 600)")
+              help="Timeout in seconds for C# decompilation (default: 600)")
+@click.option("--game-fix", default=None,
+              help="Apply per-game decompiler fixes (auto-detected if omitted, 'none' to skip)")
 def recover(
     game_dir: Path, output_dir: Path,
     engine_version: str, engine_path: Path | None,
     skip_engine: bool, game_name: str | None, no_stubs: bool,
-    decompile_timeout: int,
+    decompile_timeout: int, game_fix: str | None,
 ) -> None:
     """Recover exported game into a Murder Engine editor project."""
     from murder_unpack.recover.project_recovery import recover_project
@@ -214,6 +216,7 @@ def recover(
         skip_engine=skip_engine,
         generate_stubs_flag=not no_stubs,
         decompile_timeout=decompile_timeout,
+        game_fix_id=game_fix,
     )
 
 
@@ -225,8 +228,8 @@ def recover(
 @click.option("--extract-assemblies", type=click.Path(path_type=Path), default=None,
               help="Extract .dlls from single-file bundle")
 @click.option("--decompile", type=click.Path(path_type=Path), default=None,
-              help="Decompile to C# source (needs ilspycmd)")
-@click.option("--namespace", default="Road.", help="Namespace prefix to scan for")
+              help="Decompile to C# source (needs dotnet SDK)")
+@click.option("--namespace", default="", help="Namespace prefix to scan for (auto-detected if omitted)")
 def analyze_binary(
     exe_path: Path,
     extract_assemblies: Path | None,
@@ -249,10 +252,11 @@ def analyze_binary(
     if info.has_clr:
         click.echo(f"CLR header: {info.has_clr}")
 
-    # Extract type names from NativeAOT binary
+    # Extract type names from binary
     from murder_unpack.binary.native_strings import extract_type_names
     types = extract_type_names(exe_path, namespace)
-    click.echo(f"\n{namespace}* types found: {types.total}")
+    detected_ns = namespace or "(auto-detected)"
+    click.echo(f"\n{detected_ns}* types found: {types.total}")
     click.echo(f"  Assets: {len(types.assets)}")
     click.echo(f"  Components: {len(types.components)}")
     click.echo(f"  Systems: {len(types.systems)}")
@@ -274,21 +278,27 @@ def analyze_binary(
     if decompile is not None:
         from murder_unpack.binary.decompiler import (
             decompile_assembly,
+            decompile_with_helper,
             find_game_assembly,
+            is_dotnet_available,
             is_ilspycmd_available,
         )
-        if not is_ilspycmd_available():
-            click.echo("\nilspycmd not found. Install with: dotnet tool install -g ilspycmd")
+        if not is_dotnet_available():
+            click.echo("\ndotnet SDK not found — required for decompilation")
             return
 
-        if extract_assemblies:
-            game_dll = find_game_assembly(extract_assemblies)
-        else:
-            game_dll = find_game_assembly(exe_path.parent)
+        ref_dir = extract_assemblies if extract_assemblies else exe_path.parent
+        game_dll = find_game_assembly(ref_dir)
 
         if game_dll:
             click.echo(f"\nDecompiling {game_dll.name}...")
-            if decompile_assembly(game_dll, decompile):
+            success = decompile_with_helper(
+                game_dll, decompile, reference_dir=ref_dir,
+            )
+            if not success and is_ilspycmd_available():
+                click.echo("Retrying with ilspycmd...")
+                success = decompile_assembly(game_dll, decompile)
+            if success:
                 click.echo(f"Decompiled to {decompile}")
             else:
                 click.echo("Decompilation failed")

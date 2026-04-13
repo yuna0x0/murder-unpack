@@ -111,3 +111,47 @@ class GameDatabase:
         """Load atlas JSON metadata."""
         atlas_path = Path(game_dir) / "resources" / "atlas" / f"{atlas_name}.json"
         return load_json(atlas_path)
+
+    @property
+    def game_namespace(self) -> str | None:
+        """Auto-detect the game's root namespace from asset $type fields.
+
+        Scans all type names, filters out Murder/Bang/System engine types,
+        and returns the most common root namespace (e.g., "MyGame").
+        """
+        if hasattr(self, "_game_namespace"):
+            return self._game_namespace
+
+        engine_roots = {
+            "Murder", "Bang", "Gum", "System", "Microsoft",
+            "MonoGame", "FNA", "Newtonsoft",
+        }
+        counts: dict[str, int] = {}
+        for type_name in self._by_type:
+            root = type_name.split(".")[0] if "." in type_name else ""
+            if root and root not in engine_roots:
+                counts[root] = counts.get(root, 0) + len(self._by_type[type_name])
+
+        self._game_namespace = max(counts, key=counts.get) if counts else None
+        return self._game_namespace
+
+    def find_types(self, suffix: str) -> list[str]:
+        """Find all type names ending with the given suffix.
+
+        Example: db.find_types("SpeakerAsset") might return
+        ["MyGame.Assets.MySpeakerAsset", "Murder.Assets.Dialogs.SpeakerAsset"]
+        """
+        return [t for t in self._by_type if t.endswith(suffix)]
+
+    def get_by_type_suffix(self, suffix: str) -> list[dict[str, Any]]:
+        """Get all assets whose $type ends with the given suffix."""
+        results: list[dict[str, Any]] = []
+        for type_name, assets in self._by_type.items():
+            if type_name.endswith(suffix):
+                results.extend(assets)
+        return results
+
+    def is_game_type(self, type_name: str) -> bool:
+        """Check if a type belongs to the game (not the engine)."""
+        ns = self.game_namespace
+        return ns is not None and type_name.startswith(f"{ns}.")

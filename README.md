@@ -5,15 +5,15 @@ Reverse-engineer exported [Murder Engine](https://github.com/isadorasophia/murde
 ## Features
 
 - **Project recovery** — Reconstruct a Murder Engine editor project from an exported game
-- **C# decompilation** — Full source recovery from managed single-file bundles via ilspycmd
+- **C# decompilation** — Full source recovery from managed single-file bundles via bundled per-type decompiler (ilspycmd fallback)
 - **C# stub generation** — Fallback: auto-generate typed C# classes from packed JSON data (NativeAOT games)
+- **Per-game fixes** — Auto-detected decompiler artifact fixes with extensible registry
 - **Asset extraction** — Unpack `.gz` data files into individual JSON assets
 - **Sprite extraction** — Extract individual sprites from texture atlas sheets as PNG
 - **Dialogue export** — Reconstruct `.gum` scripts and export to markdown
 - **Localization export** — Export localization CSV files matching Murder's editor format
 - **Engine version detection** — Auto-detect engine version from game_config fingerprinting
-- **Binary analysis** — Detect .NET deployment format (NativeAOT, single-file, self-contained) with managed assembly detection
-- **ARM64 Windows support** — Auto-configures x64 build workaround for Murder.FNA
+- **Binary analysis** — Detect .NET deployment format (NativeAOT, single-file, self-contained)
 - **Repacking** — Repack modified assets back into `.gz` format
 - **Plugin system** — Extend with drop-in `.py` files or pip-installable packages
 
@@ -24,8 +24,7 @@ Reverse-engineer exported [Murder Engine](https://github.com/isadorasophia/murde
 - Python 3.11+
 - [uv](https://docs.astral.sh/uv/) (recommended) or pip
 - Git (for engine cloning)
-- .NET 8 SDK (for building recovered projects)
-- [ilspycmd](https://github.com/icsharpcode/ILSpy) (optional, for C# decompilation): `dotnet tool install -g ilspycmd`
+- .NET 8 SDK (for building recovered projects and the bundled decompiler)
 
 ### Install
 
@@ -69,28 +68,75 @@ murder-unpack list-assets "path/to/game" --type WorldAsset
 | `recover` | Full editor project recovery |
 | `engine-versions` | List available Murder Engine branches and tags |
 | `repack` | Repack modified assets back into `.gz` format |
-| `analyze-binary` | Detect .NET format, managed assembly detection, extract types |
-| `plugins list` | List loaded plugins |
-| `plugins dir` | Show plugin directories |
+| `analyze-binary` | Detect .NET format, extract types, decompile |
+| `plugins` | List loaded plugins and plugin directories |
 
 ### Recovery Options
 
 ```bash
 murder-unpack recover "path/to/game" recovered/ \
     --engine-version rel/11.0 \    # Override auto-detected version
-    --game-name MyGame \           # Project name (default: original assembly name)
+    --game-name MyGame \           # Project name (auto-detected)
+    --engine-path /path/to/murder  # Use existing engine clone
     --skip-engine \                # Don't clone engine
-    --engine-path /path/to/murder  # Use existing engine
     --no-stubs \                   # Skip C# stub/decompilation
-    --decompile-timeout 1200       # ilspycmd timeout in seconds (default: 600)
+    --decompile-timeout 1200       # Decompilation timeout (default: 600)
+    --game-fix neverway            # Per-game fix (auto-detected, 'none' to skip)
+```
+
+## Per-Game Fixes
+
+Decompiled code sometimes has game-specific issues that can't be fixed generically (lost tuple element names, readonly field assignments, duplicate local functions). The fix registry auto-detects the game and applies known fixes.
+
+Detection uses: assembly name, game namespace, Steam App ID, or game_config `$type`.
+
+### Adding a fix for a new game
+
+Create `murder_unpack/fixes/my_game.py`:
+
+```python
+from murder_unpack.fixes import GameFix, Replacement
+
+FIX = GameFix(
+    id="my-game",
+    name="My Game",
+    assembly_names=["MyGame"],
+    steam_app_ids=["123456"],
+    replacements=[
+        Replacement(
+            file_glob="**/SomeFile.cs",
+            old="broken code",
+            new="fixed code",
+            description="CS1234: description of the issue",
+        ),
+    ],
+)
+```
+
+Register in `murder_unpack/fixes/__init__.py`:
+
+```python
+def _load_builtin_fixes() -> None:
+    from murder_unpack.fixes import my_game
+    _registry.register(my_game.FIX)
+```
+
+Or register via plugin:
+
+```python
+def register(registry):
+    from murder_unpack.fixes import get_registry
+    get_registry().register(my_fix)
 ```
 
 ## Plugin System
 
-Place `.py` files in `~/.murder-unpack/plugins/` or `./plugins/`:
+Plugins extend murder-unpack with custom asset handlers, extractors, commands, and hooks.
+
+**Drop-in plugins** — Place `.py` files in `~/.murder-unpack/plugins/` or `./plugins/`:
 
 ```python
-# plugins/my_handler.py
+# plugins/my_plugin.py
 def register(registry):
     registry.asset_handlers["my_handler"] = MyHandler()
 
@@ -98,14 +144,11 @@ class MyHandler:
     name = "my_handler"
     asset_types = ["Custom.Assets.MyAsset"]
 
-    def parse(self, asset_data):
-        return asset_data
-
     def export(self, asset, output_path):
         output_path.write_text(str(asset))
 ```
 
-Pip-installable plugins use entry points:
+**Pip-installable plugins** — Use entry points in `pyproject.toml`:
 
 ```toml
 [project.entry-points."murder_unpack.asset_handlers"]
@@ -115,34 +158,24 @@ my_handler = "my_plugin:MyHandler"
 my_cmd = "my_plugin.cli:my_command"
 ```
 
+**Available extension points:** `asset_handlers`, `extractors`, `commands`, `hooks` (`pre_extract`, `post_extract`, `pre_recover`, `post_recover`)
+
 ## Limitations
-
-### Engine Version Detection
-
-Murder Engine does not embed a version string in exported games. Version detection works by fingerprinting which fields are present in `game_config` — fields were added and removed across major releases. This means:
-
-- Detection covers **rel/3.6 through rel/11.0**. Unrecognized configs fall back to `main` (per Murder Engine convention).
-- Some version ranges are **indistinguishable** (e.g., rel/8.0, rel/9.0, and rel/10.0 share identical GameProfile fields — we default to rel/10.0).
-- Use `--engine-version` to override if auto-detection picks the wrong version.
 
 ### C# Source Recovery
 
-Recovery automatically detects the game's .NET deployment format and chooses the best strategy:
+- **Managed single-file bundles** — Full source recovery via bundled decompile-helper (per-type decompilation with timeouts). Falls back to ilspycmd, then to stub generation.
+- **NativeAOT binaries** — Cannot be decompiled. Recovery generates C# stubs for compilation but without behavior.
 
-- **Managed single-file bundles** — Full C# source recovery via ilspycmd decompilation. The game assembly is extracted from the bundle, decompiled, and placed in the project. Requires `ilspycmd` (`dotnet tool install -g ilspycmd`). If ilspycmd is not installed or decompilation fails/times out, recovery falls back to stub generation.
-- **NativeAOT binaries** — Game logic is baked into a native binary and cannot be decompiled. Recovery generates empty C# stubs from packed JSON data that allow the project to compile but have no behavior. Systems, state machines, interactions, and services are not recoverable.
+With full decompilation, the recovery uses the decompiled game class directly and applies targeted compatibility fixes: `init` → `set` on engine types that cause CS8852 errors (detected via trial build), `readonly` removal on class fields for JSON deserialization, and `JsonStringEnumConverter` for string-based enum keys.
 
-Use `--decompile-timeout` to increase the timeout for ilspycmd if it runs slow on your machine (default: 600 seconds).
+### Engine Version Detection
 
-The recovery process patches the engine to warn instead of crash when referencing missing assets, so the editor remains usable. However, world entities that depend on missing game logic may not render or behave correctly.
+Covers **rel/3.6 through rel/11.0**. Some version ranges are indistinguishable (rel/8.0–10.0 default to rel/10.0). Use `--engine-version` to override.
 
 ### Dialogue Reconstruction
 
-`.gum` script reconstruction from compiled dialogue graphs is **best-effort**. Original formatting, comments, and some control flow nuances may differ from the source. The semantic content (text, choices, conditions, actions) is preserved.
-
-### Repacking
-
-The `repack` command produces `.gz` files compatible with Murder's format, but replacing files in a NativeAOT game binary requires additional patching that is not currently automated.
+`.gum` script reconstruction from compiled dialogue graphs is best-effort. Semantic content is preserved; original formatting may differ.
 
 ## Development
 

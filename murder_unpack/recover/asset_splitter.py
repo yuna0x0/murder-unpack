@@ -16,8 +16,8 @@ def detect_game_assembly(db: GameDatabase) -> str | None:
     """Detect the original game assembly name from packed data.
 
     Scans for assembly-qualified type names like:
-        Road.Components.Foo, Neverway, Version=1.0.0.0, ...
-    and returns the non-engine assembly name (e.g., "Neverway").
+        Game.Components.Foo, MyGame, Version=1.0.0.0, ...
+    and returns the non-engine assembly name (e.g., "MyGame").
     """
     skip = {"Murder", "Bang", "System", "Microsoft", "MonoGame", "FNA", "Gum"}
 
@@ -102,7 +102,7 @@ def split_assets(
 
         # GameProfile goes to root as game_config
         type_name = asset.get("$type", "")
-        if type_name in ("Murder.Assets.GameProfile", "Road.Assets.RoadGameProfile"):
+        if type_name.endswith("GameProfile"):
             continue  # Handled separately
 
         # Remap assembly names if needed
