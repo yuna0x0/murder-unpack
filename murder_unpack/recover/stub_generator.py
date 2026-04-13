@@ -54,6 +54,14 @@ def infer_csharp_type(value: Any) -> str:
             return "Color"
         if keys == {"Data1", "Data2", "Data3", "Data4", "Path"}:
             return "SoundEventId"
+        if keys == {"Id"} and isinstance(value.get("Id"), str):
+            return "LocalizedString"
+        if keys == {"Sprite", "AnimationId"}:
+            return "Portrait"
+        if keys == {"Asset", "Index", "Custom"}:
+            return "SmartInt"
+        if keys == {"Guid"} and isinstance(value.get("Guid"), str):
+            return "Guid"
         if "$type" in value:
             # Nested typed object — only use Murder engine types that are
             # guaranteed to exist. Game-specific types and generics use object.
@@ -118,14 +126,37 @@ def collect_type_schemas(db: GameDatabase) -> dict[str, dict[str, str]]:
     return result
 
 
-def _get_base_class(type_name: str) -> str:
-    """Determine the base class for a type."""
+# Fields defined on Murder engine base classes.
+# If a game-specific type has these fields, it likely extends that base class.
+_BASE_CLASS_SIGNATURES: list[tuple[str, set[str], set[str]]] = [
+    # (base_class, required_fields, extra_usings)
+    ("SpeakerAsset", {"SpeakerName", "allPortraits", "DefaultPortrait"}, {"Murder.Assets"}),
+    ("WorldEventsAsset", {"Watchers"}, {"Murder.Assets"}),
+]
+
+# Fields inherited from Murder base classes — these should NOT be
+# re-declared in the stub since the base class already defines them.
+_INHERITED_FIELDS: dict[str, set[str]] = {
+    "SpeakerAsset": {
+        "SpeakerName", "DefaultPortrait", "Events", "CustomBox",
+        "fade", "CustomFont", "allPortraits",
+    },
+    "WorldEventsAsset": {
+        "Watchers",
+    },
+}
+
+
+def _get_base_class(type_name: str, fields: dict[str, str]) -> str:
+    """Determine the base class for a type based on its fields."""
     if "GameProfile" in type_name:
         return "GameProfile"
-    if "SaveData" in type_name:
-        return "GameAsset"
-    if "Speaker" in type_name and "Asset" in type_name:
-        return "GameAsset"
+
+    field_names = set(fields.keys())
+    for base_class, required, _ in _BASE_CLASS_SIGNATURES:
+        if required.issubset(field_names):
+            return base_class
+
     return "GameAsset"
 
 
@@ -160,7 +191,8 @@ def generate_stubs(
             namespace = "Road.Assets"
             class_name = parts[0]
 
-        base_class = _get_base_class(type_name)
+        base_class = _get_base_class(type_name, fields)
+        inherited = _INHERITED_FIELDS.get(base_class, set())
 
         # Build C# source
         lines = [
@@ -169,7 +201,9 @@ def generate_stubs(
             "",
             "using Bang;",
             "using Murder.Assets;",
+            "using Murder.Core;",
             "using Murder.Core.Geometry;",
+            "using Murder.Core.Smart;",
             "using Murder.Core.Sounds;",
             "using System.Collections.Immutable;",
             "using System.Numerics;",
@@ -181,6 +215,8 @@ def generate_stubs(
         ]
 
         for field_name, field_type in sorted(fields.items()):
+            if field_name in inherited:
+                continue
             lines.append(f"    [Serialize]")
             lines.append(f"    public {field_type} {field_name} {{ get; set; }}")
             lines.append("")
