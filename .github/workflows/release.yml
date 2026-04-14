@@ -1,14 +1,32 @@
 name: Build & Release
 
 on:
-  release:
-    types: [published]
+  push:
+    tags:
+      - 'v*'
 
 permissions: {}
 
 jobs:
+  create-release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+    steps:
+      - name: Get tag name
+        id: tag
+        run: echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+
+      - name: Create draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release create "${{ steps.tag.outputs.tag }}" --repo "${{ github.repository }}" --draft --generate-notes --title "murder-unpack ${{ steps.tag.outputs.tag }}"
+
   build:
     name: Build distributions
+    needs: create-release
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -30,7 +48,7 @@ jobs:
 
   upload-release-assets:
     name: Upload to GitHub Release
-    needs: build
+    needs: [create-release, build]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -44,4 +62,16 @@ jobs:
       - name: Upload release assets
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "${{ github.event.release.tag_name }}" dist/* --clobber --repo "${{ github.repository }}"
+        run: gh release upload "${{ needs.create-release.outputs.tag }}" dist/* --clobber --repo "${{ github.repository }}"
+
+  publish:
+    name: Publish release
+    needs: [create-release, upload-release-assets]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release edit "${{ needs.create-release.outputs.tag }}" --draft=false --repo "${{ github.repository }}"
