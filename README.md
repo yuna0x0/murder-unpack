@@ -12,7 +12,8 @@ Reverse-engineer exported [Murder Engine](https://github.com/isadorasophia/murde
 - **Sprite extraction** — Extract individual sprites from texture atlas sheets as PNG
 - **Dialogue export** — Reconstruct `.gum` scripts and export to markdown
 - **Localization export** — Export localization CSV files matching Murder's editor format
-- **Engine version detection** — Auto-detect engine version from game_config fingerprinting
+- **Engine version detection** — Per-game lookup for known games, fingerprint detection for unknown games
+- **macOS .app support** — All commands accept `.app` bundle paths directly
 - **Binary analysis** — Detect .NET deployment format (NativeAOT, single-file, self-contained)
 - **Repacking** — Repack modified assets back into `.gz` format
 - **Plugin system** — Extend with drop-in `.py` files or pip-installable packages
@@ -24,7 +25,7 @@ Reverse-engineer exported [Murder Engine](https://github.com/isadorasophia/murde
 - Python 3.11+
 - [uv](https://docs.astral.sh/uv/) (recommended) or pip
 - Git (for engine cloning)
-- .NET 8 SDK (for building recovered projects and the bundled decompiler)
+- .NET SDK matching the game's engine version (net7.0 or net8.0; for building recovered projects and the bundled decompiler)
 
 ### Install
 
@@ -75,7 +76,8 @@ murder-unpack list-assets "path/to/game" --type WorldAsset
 
 ```bash
 murder-unpack recover "path/to/game" recovered/ \
-    --engine-version rel/11.0 \    # Override auto-detected version
+    --engine-version rel/11.0 \    # Override auto-detected version (branch/tag/commit)
+    --engine-repo https://...  \   # Use a fork or custom engine repo
     --game-name MyGame \           # Project name (auto-detected)
     --engine-path /path/to/murder  # Use existing engine clone
     --skip-engine \                # Don't clone engine
@@ -88,7 +90,7 @@ murder-unpack recover "path/to/game" recovered/ \
 
 Decompiled code sometimes has game-specific issues that can't be fixed generically (lost tuple element names, readonly field assignments, duplicate local functions). The fix registry auto-detects the game and applies known fixes.
 
-Detection uses: assembly name, game namespace, Steam App ID, or game_config `$type`.
+Detection uses: assembly name, game namespace, Steam App ID, or game_config `$type`. Each game fix can also provide the exact engine commit for accurate recovery.
 
 ### Adding a fix for a new game
 
@@ -102,6 +104,7 @@ FIX = GameFix(
     name="My Game",
     assembly_names=["MyGame"],
     steam_app_ids=["123456"],
+    engine_version="abc123...",  # exact engine commit (optional)
     replacements=[
         Replacement(
             file_glob="**/SomeFile.cs",
@@ -171,7 +174,7 @@ With full decompilation, the recovery uses the decompiled game class directly an
 
 ### Engine Version Detection
 
-Covers **rel/3.6 through rel/11.0**. Some version ranges are indistinguishable (rel/8.0–10.0 default to rel/10.0). Use `--engine-version` to override.
+For known games, the fix registry provides the exact engine commit. For unknown games, fingerprint detection covers **rel/3.6 through rel/11.0** (some ranges are indistinguishable, e.g. rel/8.0-10.0 default to rel/10.0). Use `--engine-version` to override with a branch, tag, or commit hash.
 
 ### Dialogue Reconstruction
 

@@ -69,11 +69,14 @@ def _postprocess_decompiled(output_dir: Path) -> int:
 
         # Add missing using directives for common unqualified types.
         # The decompiler sometimes emits Vector2/Vector3 without a using.
-        # Newer Murder uses System.Numerics, older versions have Murder.Core.Geometry.Vector2.
-        # Only add System.Numerics if the file doesn't already import a Vector2 provider.
+        # Multiple namespaces provide Vector types depending on engine version:
+        #   System.Numerics (newer Murder), Murder.Core.Geometry (older Murder),
+        #   Microsoft.Xna.Framework (FNA/MonoGame games).
+        # Only add System.Numerics if no other Vector provider is already imported.
         if (re.search(r'\bVector[234]\b', new_src)
                 and "using System.Numerics;" not in new_src
-                and "using Murder.Core.Geometry;" not in new_src):
+                and "using Murder.Core.Geometry;" not in new_src
+                and "using Microsoft.Xna.Framework;" not in new_src):
             last_using = -1
             for m in re.finditer(r'^using [^;]+;\s*$', new_src, re.MULTILINE):
                 last_using = m.end()
