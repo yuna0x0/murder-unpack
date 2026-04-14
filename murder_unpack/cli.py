@@ -219,11 +219,14 @@ def decode_qoi(input_path: Path, output_path: Path) -> None:
               help="Timeout in seconds for C# decompilation (default: 600)")
 @click.option("--game-fix", default=None,
               help="Apply per-game decompiler fixes (auto-detected if omitted, 'none' to skip)")
+@click.option("--engine-repo", default=None,
+              help="Git URL for Murder Engine repo (for forks or custom versions)")
 def recover(
     game_dir: Path, output_dir: Path,
     engine_version: str, engine_path: Path | None,
     skip_engine: bool, game_name: str | None, no_stubs: bool,
     decompile_timeout: int, game_fix: str | None,
+    engine_repo: str | None,
 ) -> None:
     """Recover exported game into a Murder Engine editor project."""
     game_dir = resolve_game_dir(game_dir)
@@ -239,6 +242,7 @@ def recover(
         generate_stubs_flag=not no_stubs,
         decompile_timeout=decompile_timeout,
         game_fix_id=game_fix,
+        engine_repo=engine_repo,
     )
 
 

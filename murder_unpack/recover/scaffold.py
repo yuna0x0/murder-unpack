@@ -57,29 +57,91 @@ EndGlobal
     sln_path.write_text(content, encoding="utf-8")
 
 
+def _detect_engine_tfm(project_dir: Path) -> str:
+    """Detect the engine's TargetFramework from Murder.csproj."""
+    import re
+    murder_csproj = project_dir / MURDER_CSPROJ
+    if murder_csproj.exists():
+        src = murder_csproj.read_text(encoding="utf-8")
+        m = re.search(r"<TargetFramework>(net\d+\.\d+)</TargetFramework>", src)
+        if m:
+            return m.group(1)
+    return "net8.0"
+
+
 def _write_game_csproj(project_dir: Path, game_name: str) -> None:
     game_dir = project_dir / "src" / game_name
     game_dir.mkdir(parents=True, exist_ok=True)
 
+    # Match the engine's target framework
+    tfm = _detect_engine_tfm(project_dir)
+
     # Relative paths from src/GameName/ to project root
     murder_ref = f"../../{MURDER_CSPROJ}"
-    bang_ref = f"../../{BANG_GENERATOR_CSPROJ}"
-    bang_analyzers_ref = "../../murder/bang/src/Bang.Analyzers/Bang.Analyzers.csproj"
-    serializer_ref = f"../../{MURDER_SERIALIZER_CSPROJ}"
+
+    # Detect engine era: modern engines have Bang.Generator (source generator),
+    # older engines use Murder.Generator (post-build tool).
+    has_bang_generator = (project_dir / BANG_GENERATOR_CSPROJ).exists()
+    has_bang_analyzers = (project_dir / "murder" / "bang" / "src" / "Bang.Analyzers" / "Bang.Analyzers.csproj").exists()
+    has_serializer = (project_dir / MURDER_SERIALIZER_CSPROJ).exists()
+
+    # Build source-generator references (modern engines)
+    generator_refs = ""
+    if has_bang_analyzers:
+        bang_analyzers_ref = "../../murder/bang/src/Bang.Analyzers/Bang.Analyzers.csproj"
+        generator_refs += f"""
+    <ProjectReference Condition="'$(Configuration)' == 'Debug'" Include="{bang_analyzers_ref}">
+      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+      <OutputItemType>Analyzer</OutputItemType>
+    </ProjectReference>"""
+    if has_bang_generator:
+        bang_ref = f"../../{BANG_GENERATOR_CSPROJ}"
+        generator_refs += f"""
+    <ProjectReference Include="{bang_ref}">
+      <ReferenceOutputAssembly>true</ReferenceOutputAssembly>
+      <OutputItemType>Analyzer</OutputItemType>
+    </ProjectReference>
+    <CompilerVisibleProperty Include="GeneratorParentAssembly" />"""
+    if has_serializer:
+        serializer_ref = f"../../{MURDER_SERIALIZER_CSPROJ}"
+        generator_refs += f"""
+    <ProjectReference Include="{serializer_ref}">
+      <ReferenceOutputAssembly>true</ReferenceOutputAssembly>
+      <OutputItemType>Analyzer</OutputItemType>
+    </ProjectReference>"""
+
+    # Post-build Generator target (older engines without Bang.Generator)
+    generator_target = ""
+    if not has_bang_generator:
+        generator_target = """
+
+  <!-- Murder.Generator post-build: generates entity extension methods.
+       The Generated/ directory may contain seed files from decompilation;
+       delete them before regeneration to avoid CS0101 duplicate errors. -->
+  <PropertyGroup>
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+  </PropertyGroup>
+  <Target Name="GenerateFiles" AfterTargets="PostBuildEvent" Condition="'$(Generated)' != 'true' And '$(Configuration)' == 'Debug' And '$(SkipGenerator)' != 'true'">
+    <RemoveDir Directories="$(MSBuildProjectDirectory)/Generated" />
+    <Exec Command="$(OutputPath)Generator -buildWithBinaries $(MSBuildProjectDirectory) $(MSBuildProjectDirectory)/$(OutDir) $(AssemblyName)" Condition="'$(OS)' != 'WINDOWS_NT'" />
+    <Exec Command="$(OutputPath)Generator.exe -buildWithBinaries $(MSBuildProjectDirectory) $(MSBuildProjectDirectory)\\$(OutDir) $(AssemblyName)" Condition="'$(OS)' == 'WINDOWS_NT'" />
+    <MSBuild Projects="$(MSBuildProjectFile)" Properties="Generated=true" />
+  </Target>"""
+
+    # Suppress Bang analyzer rules only when they exist
+    nowarn = ""
+    if has_bang_analyzers:
+        nowarn = "\n    <NoWarn>BANG0001;BANG0002;BANG1001;BANG3001;BANG3002;BANG5001;BANG5002</NoWarn>"
 
     content = f"""\
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFramework>net8.0</TargetFramework>
+    <TargetFramework>{tfm}</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <PublishAot>true</PublishAot>
     <IsTrimmable>false</IsTrimmable>
     <JsonSerializerIsReflectionEnabledByDefault>false</JsonSerializerIsReflectionEnabledByDefault>
-    <ErrorOnDuplicatePublishOutputFiles>false</ErrorOnDuplicatePublishOutputFiles>
-    <GeneratorParentAssembly>Murder</GeneratorParentAssembly>
-    <!-- Suppress Bang analyzer style rules for decompiled code -->
-    <NoWarn>BANG0002;BANG3002;BANG5002</NoWarn>
+    <ErrorOnDuplicatePublishOutputFiles>false</ErrorOnDuplicatePublishOutputFiles>{f"{chr(10)}    <GeneratorParentAssembly>Murder</GeneratorParentAssembly>" if has_bang_generator else ""}{nowarn}
   </PropertyGroup>
 
   <!-- Copy resources and packed data to build output -->
@@ -89,20 +151,7 @@ def _write_game_csproj(project_dir: Path, game_name: str) -> None:
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="{murder_ref}" />
-    <ProjectReference Condition="'$(Configuration)' == 'Debug'" Include="{bang_analyzers_ref}">
-      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
-      <OutputItemType>Analyzer</OutputItemType>
-    </ProjectReference>
-    <ProjectReference Include="{bang_ref}">
-      <ReferenceOutputAssembly>true</ReferenceOutputAssembly>
-      <OutputItemType>Analyzer</OutputItemType>
-    </ProjectReference>
-    <CompilerVisibleProperty Include="GeneratorParentAssembly" />
-    <ProjectReference Include="{serializer_ref}">
-      <ReferenceOutputAssembly>true</ReferenceOutputAssembly>
-      <OutputItemType>Analyzer</OutputItemType>
-    </ProjectReference>
+    <ProjectReference Include="{murder_ref}" />{generator_refs}
   </ItemGroup>
 
   <ItemGroup>
@@ -110,7 +159,7 @@ def _write_game_csproj(project_dir: Path, game_name: str) -> None:
     <TrimmerRootAssembly Include="Murder" />
     <TrimmerRootAssembly Include="MonoGame.Framework" />
     <TrimmerRootAssembly Include="{game_name}" />
-  </ItemGroup>
+  </ItemGroup>{generator_target}
 </Project>
 """
     (game_dir / f"{game_name}.csproj").write_text(content, encoding="utf-8")
@@ -120,6 +169,7 @@ def _write_editor_csproj(project_dir: Path, game_name: str) -> None:
     editor_dir = project_dir / "src" / f"{game_name}.Editor"
     editor_dir.mkdir(parents=True, exist_ok=True)
 
+    tfm = _detect_engine_tfm(project_dir)
     murder_editor_ref = f"../../{MURDER_EDITOR_CSPROJ}"
     game_ref = f"../{game_name}/{game_name}.csproj"
 
@@ -127,7 +177,7 @@ def _write_editor_csproj(project_dir: Path, game_name: str) -> None:
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <TargetFramework>net8.0</TargetFramework>
+    <TargetFramework>{tfm}</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <PublishReadyToRun>false</PublishReadyToRun>

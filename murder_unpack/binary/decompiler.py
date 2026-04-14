@@ -39,22 +39,14 @@ def _postprocess_decompiled(output_dir: Path) -> int:
     """
     fixes = 0
 
-    # Remove Roslyn source-generator output that gets regenerated at build time.
-    # Keeping the decompiled copies causes CS0111 duplicate member errors.
-
-    # Bang.Generator output: ComponentsLookup, EntityExtensions, ComponentTypes,
-    # MessageTypes, WorldExtensions
-    bang_dir = output_dir / "Bang"
-    if bang_dir.is_dir():
-        count = sum(1 for _ in bang_dir.rglob("*.cs"))
-        shutil.rmtree(bang_dir)
-        fixes += count
-
     # Murder.Serializer output: {GameName}SerializerOptionsExtensions
     # The generator produces this for every project that references it.
     for cs_file in output_dir.rglob("*SerializerOptionsExtensions.cs"):
         cs_file.unlink()
         fixes += 1
+
+    # Note: Bang/ directory (source-generator output) is handled by
+    # recovery based on engine version -- see _cleanup_generated_code().
 
     # Fix decompiler artifacts in .cs files:
     # - `readonly struct` with `set` properties → `struct` (CS8341)
@@ -74,6 +66,32 @@ def _postprocess_decompiled(output_dir: Path) -> int:
                 lambda m: f"{'record ' if m.group(1) else ''}struct", new_src,
             )
         new_src = _RE_READONLY_SINGLE.sub(r"new[] { \1 }", new_src)
+
+        # Add missing using directives for common unqualified types.
+        # The decompiler sometimes emits Vector2/Vector3 without a using.
+        # Newer Murder uses System.Numerics, older versions have Murder.Core.Geometry.Vector2.
+        # Only add System.Numerics if the file doesn't already import a Vector2 provider.
+        if (re.search(r'\bVector[234]\b', new_src)
+                and "using System.Numerics;" not in new_src
+                and "using Murder.Core.Geometry;" not in new_src):
+            last_using = -1
+            for m in re.finditer(r'^using [^;]+;\s*$', new_src, re.MULTILINE):
+                last_using = m.end()
+            if last_using >= 0:
+                new_src = new_src[:last_using] + "using System.Numerics;\n" + new_src[last_using:]
+            else:
+                new_src = "using System.Numerics;\n\n" + new_src
+
+        # Promote internal types to public. The decompiler emits internal
+        # for types that were internal in the original assembly, but Murder's
+        # source generators (Bang.Generator, Murder.Serializer) need them
+        # to be public to generate correct code.
+        new_src = re.sub(
+            r'^(internal\s+)((?:readonly\s+)?(?:struct|class|record|enum)\b)',
+            r'public \2',
+            new_src,
+            flags=re.MULTILINE,
+        )
 
         if new_src != src:
             cs_file.write_text(new_src, encoding="utf-8")

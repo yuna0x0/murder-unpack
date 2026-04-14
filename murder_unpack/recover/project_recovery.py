@@ -54,6 +54,7 @@ def recover_project(
     generate_stubs_flag: bool = True,
     decompile_timeout: int = 600,
     game_fix_id: str | None = None,
+    engine_repo: str | None = None,
 ) -> None:
     """Recover a Murder Engine game export into an editor-openable project.
 
@@ -85,7 +86,13 @@ def recover_project(
 
     # Auto-detect engine version from game_config if not specified
     if engine_version is None and not skip_engine and engine_path is None:
-        engine_version = detect_engine_version(db.game_config)
+        original_assembly = detect_game_assembly(db)
+        engine_version = detect_engine_version(
+            db.game_config,
+            assembly_name=original_assembly,
+            db=db,
+            game_dir=game_dir,
+        )
         click.echo(f"  Auto-detected engine version: {engine_version}")
     elif engine_version is None:
         engine_version = "main"
@@ -104,8 +111,16 @@ def recover_project(
                 )
         else:
             click.echo(f"Cloning Murder engine ({engine_version})...")
-            clone_engine(output_dir, engine_version)
+            clone_engine(output_dir, engine_version, repo=engine_repo)
             click.echo("  Engine cloned with submodules")
+
+    # Step 2b: Check for EOL target frameworks in engine
+    engine_dir = output_dir / "murder"
+    if engine_dir.is_dir():
+        eol_tfm = _check_eol_frameworks(engine_dir)
+        if eol_tfm:
+            click.echo(f"  WARNING: Engine targets {eol_tfm} (EOL). Install the runtime:")
+            click.echo(f"    dotnet workload install {eol_tfm} OR download from https://dotnet.microsoft.com/download/dotnet")
 
     # Step 3: Create project scaffold
     click.echo("Generating project scaffold...")
@@ -176,6 +191,30 @@ def recover_project(
             click.echo("Generating C# stubs for game-specific types...")
             stub_count = generate_stubs(db, stubs_dir)
             click.echo(f"  Generated {stub_count} stub classes")
+
+    # Step 10b: Handle decompiled source-generator output.
+    # Modern engines (with Bang.Generator) regenerate these at build time,
+    # so we delete the decompiled copies to avoid CS0111 duplicates.
+    # Older engines (with Murder.Generator post-build tool) need the decompiled
+    # copies as seed files since the tool only runs after a successful build.
+    if decompiled:
+        decompiled_dir = game_src_dir / "Decompiled"
+        has_bang_generator = (output_dir / "murder" / "bang" / "src" / "Bang.Generator" / "Bang.Generator.csproj").exists()
+        if has_bang_generator:
+            bang_dir = decompiled_dir / "Bang"
+            if bang_dir.is_dir():
+                shutil.rmtree(bang_dir)
+        else:
+            # Move generated extensions to Generated/ where the post-build
+            # Generator expects to find and update them
+            bang_dir = decompiled_dir / "Bang"
+            gen_dir = game_src_dir / "Generated"
+            if bang_dir.is_dir():
+                gen_dir.mkdir(parents=True, exist_ok=True)
+                for cs_file in bang_dir.rglob("*.cs"):
+                    dest = gen_dir / cs_file.name
+                    shutil.move(str(cs_file), str(dest))
+                shutil.rmtree(bang_dir)
 
     # Step 11: Mode-specific setup
     if decompiled:
@@ -387,6 +426,23 @@ def _try_decompile_game(game_dir: Path, game_src_dir: Path, timeout: int = 600) 
             shutil.rmtree(extract_dir)
 
     return True
+
+
+def _check_eol_frameworks(engine_dir: Path) -> str | None:
+    """Check if engine uses an EOL .NET target framework.
+
+    Returns the EOL framework name (e.g. "net7.0") or None.
+    """
+    import re
+    for csproj in engine_dir.rglob("*.csproj"):
+        try:
+            src = csproj.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        m = re.search(r"<TargetFramework>(net[67]\.0)</TargetFramework>", src)
+        if m:
+            return m.group(1)
+    return None
 
 
 def _patch_getasset(output_dir: Path) -> None:

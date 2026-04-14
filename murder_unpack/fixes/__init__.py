@@ -38,15 +38,25 @@ class Replacement:
 
 @dataclass
 class GameFix:
-    """A collection of fixes for a specific game."""
+    """All game-specific knowledge: detection, engine version, and fixes.
+
+    Each known game gets one GameFix that centralizes:
+    - Detection criteria (assembly name, namespace, config type, Steam ID)
+    - Known engine version (exact commit hash, branch, or tag)
+    - Decompiler fix actions (text replacements, custom functions)
+    """
     id: str  # unique identifier (e.g., "neverway")
     name: str  # display name (e.g., "Neverway Prologue")
 
-    # Detection criteria — any match triggers this fix
+    # Detection criteria -- any match triggers this fix
     assembly_names: list[str] = field(default_factory=list)
     game_namespaces: list[str] = field(default_factory=list)
     steam_app_ids: list[str] = field(default_factory=list)
     game_config_types: list[str] = field(default_factory=list)
+
+    # Known engine version (commit hash, branch, or tag).
+    # Used by detect_engine_version() before falling back to fingerprinting.
+    engine_version: str | None = None
 
     # Fix actions
     replacements: list[Replacement] = field(default_factory=list)
@@ -125,6 +135,21 @@ class FixRegistry:
                 return fix
         return None
 
+    def detect_engine_version(
+        self,
+        db: GameDatabase | None = None,
+        game_dir: Path | None = None,
+        assembly_name: str | None = None,
+    ) -> str | None:
+        """Look up known engine version for a detected game.
+
+        Returns the engine version string if a matching game has one, else None.
+        """
+        fix = self.detect(db=db, game_dir=game_dir, assembly_name=assembly_name)
+        if fix and fix.engine_version:
+            return fix.engine_version
+        return None
+
     def list_all(self) -> list[GameFix]:
         return list(self._fixes.values())
 
@@ -142,5 +167,6 @@ def get_registry() -> FixRegistry:
 
 def _load_builtin_fixes() -> None:
     """Load all built-in game fixes."""
-    from murder_unpack.fixes import neverway
+    from murder_unpack.fixes import ldgame, neverway
     _registry.register(neverway.FIX)
+    _registry.register(ldgame.FIX)
