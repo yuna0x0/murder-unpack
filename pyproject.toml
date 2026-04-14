@@ -1,6 +1,6 @@
 [project]
 name = "murder-unpack"
-version = "0.2.0"
+version = "0.2.1"
 description = "Decompile, unpack, recover, and repack tools for Murder Engine games"
 readme = "README.md"
 license = "MIT"

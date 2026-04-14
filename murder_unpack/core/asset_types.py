@@ -52,7 +52,8 @@ _TYPE_MAP: dict[str, tuple[str, str]] = {
 
 def is_game_profile_type(type_name: str) -> bool:
     """Check if a type is a GameProfile (engine or game-specific subclass)."""
-    return type_name == "Murder.Assets.GameProfile" or type_name.endswith("GameProfile")
+    bare = type_name.split(",")[0].strip() if "," in type_name else type_name
+    return bare == "Murder.Assets.GameProfile" or bare.endswith("GameProfile")
 
 
 def get_asset_directory(asset: dict[str, Any]) -> str:
@@ -62,13 +63,16 @@ def get_asset_directory(asset: dict[str, Any]) -> str:
     """
     type_name = asset.get("$type", "")
 
+    # Strip assembly qualifier if present (e.g. "Murder.Assets.PrefabAsset, Murder" → "Murder.Assets.PrefabAsset")
+    bare_type = type_name.split(",")[0].strip() if "," in type_name else type_name
+
     # GameProfile subclasses (game-specific) — stored at root
-    if is_game_profile_type(type_name):
+    if is_game_profile_type(bare_type):
         return ""
 
     # Check known type mapping
-    if type_name in _TYPE_MAP:
-        base, folder = _TYPE_MAP[type_name]
+    if bare_type in _TYPE_MAP:
+        base, folder = _TYPE_MAP[bare_type]
         # SpriteAsset uses dynamic editorPath from JSON
         if folder == "__from_editorPath__":
             editor_path = asset.get("editorPath", "Generated")
@@ -96,7 +100,8 @@ def get_asset_filename(asset: dict[str, Any]) -> str:
 
 def get_save_location(type_name: str) -> str:
     """Get the SaveLocation base for a type (data/ or ecs/)."""
-    if type_name in _TYPE_MAP:
-        base, _ = _TYPE_MAP[type_name]
+    bare = type_name.split(",")[0].strip() if "," in type_name else type_name
+    if bare in _TYPE_MAP:
+        base, _ = _TYPE_MAP[bare]
         return base
     return "data"

@@ -326,7 +326,7 @@ def find_game_assembly(assemblies_dir: Path | str) -> Path | None:
     """
     assemblies_dir = Path(assemblies_dir)
     skip_prefixes = (
-        "System.", "Microsoft.", "FNA", "SDL", "FAudio",
+        "System.", "Microsoft.", "FNA", "MonoGame.", "SDL", "FAudio",
         "Newtonsoft.", "Bang.", "Murder.", "Gum.",
     )
 

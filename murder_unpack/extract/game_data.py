@@ -28,16 +28,46 @@ class GameDatabase:
     def load(self, game_dir: Path | str) -> None:
         """Load all game data from a game directory.
 
+        Supports two Murder Engine data layouts:
+        - Packed (published builds): resources/content/ with data0.gz..dataN.gz
+        - Source (editor/dev builds): resources/assets/data/ and assets/ecs/
+                                      with individual .json files
+
+        Both use resources/game_config (some games ship game_config.json).
+
         Args:
             game_dir: Path to game root (containing resources/ directory)
         """
         game_dir = Path(game_dir)
+
+        assets_dir = game_dir / "resources" / "assets"
         content_dir = game_dir / "resources" / "content"
-        config_path = game_dir / "resources" / "game_config"
 
-        if config_path.exists():
-            self.game_config = load_json(config_path)
+        # Load game_config (some games add .json extension)
+        for config_name in ("game_config.json", "game_config"):
+            config_path = game_dir / "resources" / config_name
+            if config_path.exists():
+                self.game_config = load_json(config_path)
+                break
 
+        if assets_dir.is_dir():
+            self._load_source_assets(assets_dir)
+        if content_dir.is_dir():
+            self._load_packed_content(content_dir)
+
+    def _load_source_assets(self, assets_dir: Path) -> None:
+        """Load individual .json asset files (source/editor layout)."""
+        for json_file in sorted(assets_dir.rglob("*.json")):
+            try:
+                asset = load_json(json_file)
+            except (json.JSONDecodeError, OSError):
+                continue
+            if isinstance(asset, dict) and "$type" in asset:
+                self.assets.append(asset)
+                self._index_asset(asset)
+
+    def _load_packed_content(self, content_dir: Path) -> None:
+        """Load packed .gz data files (published build layout)."""
         # Load preload data first — it tells us how many data files exist
         preload_path = content_dir / "preload_data.gz"
         if preload_path.exists():
