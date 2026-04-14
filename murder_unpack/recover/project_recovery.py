@@ -253,7 +253,7 @@ def _apply_game_fixes(
         click.echo("  No per-game fixes detected (use --game-fix to specify)")
 
 
-def _find_game_executable(game_dir: Path) -> Path | None:
+def find_game_executable(game_dir: Path) -> Path | None:
     """Find the Murder Engine game executable in the game directory.
 
     Murder Engine exports place the game executable at the root of the
@@ -307,7 +307,7 @@ def _try_decompile_game(game_dir: Path, game_src_dir: Path, timeout: int = 600) 
     )
     from murder_unpack.binary.detect import detect_binary
 
-    exe_path = _find_game_executable(game_dir)
+    exe_path = find_game_executable(game_dir)
     if exe_path is None:
         click.echo("Analyzing game binary... no executable found")
         return False

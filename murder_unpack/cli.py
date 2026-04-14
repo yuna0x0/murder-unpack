@@ -12,6 +12,19 @@ from murder_unpack.plugins.registry import PluginRegistry
 _registry = PluginRegistry()
 
 
+def resolve_game_dir(game_dir: Path) -> Path:
+    """Resolve macOS .app bundles to Contents/MacOS/.
+
+    Accepts XXX.app paths and returns the actual game root directory.
+    For flat directories, returns the input unchanged.
+    """
+    if game_dir.suffix == ".app":
+        macos_dir = game_dir / "Contents" / "MacOS"
+        if macos_dir.is_dir():
+            return macos_dir
+    return game_dir
+
+
 @click.group()
 @click.version_option(package_name="murder-unpack")
 @click.pass_context
@@ -34,6 +47,7 @@ def main(ctx: click.Context) -> None:
 @click.argument("game_dir", type=click.Path(exists=True, path_type=Path))
 def info(game_dir: Path) -> None:
     """Show game info and asset counts."""
+    game_dir = resolve_game_dir(game_dir)
     from murder_unpack.extract.game_data import GameDatabase
 
     db = GameDatabase()
@@ -67,6 +81,7 @@ def info(game_dir: Path) -> None:
 @click.argument("output_dir", type=click.Path(path_type=Path))
 def extract_data(game_dir: Path, output_dir: Path) -> None:
     """Dump all .gz data files as plain JSON."""
+    game_dir = resolve_game_dir(game_dir)
     from murder_unpack.core.gzip_json import decompress_gz_json, save_json
 
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -94,6 +109,7 @@ def extract_data(game_dir: Path, output_dir: Path) -> None:
 @click.option("--no-untrim", is_flag=True, help="Don't reconstruct original size")
 def extract_sprites(game_dir: Path, output_dir: Path, atlas: str | None, no_untrim: bool) -> None:
     """Extract all sprites from atlas sheets as PNG files."""
+    game_dir = resolve_game_dir(game_dir)
     from murder_unpack.extract.game_data import GameDatabase
     from murder_unpack.extract.sprite_extractor import SpriteExtractor
 
@@ -124,6 +140,7 @@ def extract_sprites(game_dir: Path, output_dir: Path, atlas: str | None, no_untr
               help="Output format: gum (Murder's script format), markdown, or both")
 def extract_dialogue(game_dir: Path, output_dir: Path, fmt: str) -> None:
     """Export all dialogue scripts (default: both .gum and .md formats)."""
+    game_dir = resolve_game_dir(game_dir)
     from murder_unpack.extract.game_data import GameDatabase
 
     db = GameDatabase()
@@ -151,6 +168,7 @@ def extract_dialogue(game_dir: Path, output_dir: Path, fmt: str) -> None:
 @click.option("--name", "name_filter", default=None, help="Filter by name (substring)")
 def list_assets(game_dir: Path, type_filter: str | None, name_filter: str | None) -> None:
     """List all assets in the game data."""
+    game_dir = resolve_game_dir(game_dir)
     from murder_unpack.extract.game_data import GameDatabase
 
     db = GameDatabase()
@@ -208,6 +226,7 @@ def recover(
     decompile_timeout: int, game_fix: str | None,
 ) -> None:
     """Recover exported game into a Murder Engine editor project."""
+    game_dir = resolve_game_dir(game_dir)
     from murder_unpack.recover.project_recovery import recover_project
 
     recover_project(
@@ -240,6 +259,16 @@ def analyze_binary(
     namespace: str,
 ) -> None:
     """Analyze game executable — detect format, extract types."""
+    # Support passing a .app bundle -- find the executable inside
+    if exe_path.suffix == ".app" or (exe_path.is_dir() and not exe_path.is_file()):
+        game_dir = resolve_game_dir(exe_path) if exe_path.suffix == ".app" else exe_path
+        from murder_unpack.recover.project_recovery import find_game_executable
+        found = find_game_executable(game_dir)
+        if found is None:
+            raise click.ClickException(f"No game executable found in {game_dir}")
+        click.echo(f"Found executable: {found.name}")
+        exe_path = found
+
     from murder_unpack.binary.detect import detect_binary
 
     info = detect_binary(exe_path)
@@ -361,6 +390,7 @@ def repack(project_dir: Path, output_dir: Path) -> None:
 @click.argument("output_dir", type=click.Path(path_type=Path))
 def extract_all(game_dir: Path, output_dir: Path) -> None:
     """Full extraction: data, sprites, dialogues (.gum + markdown), and localization."""
+    game_dir = resolve_game_dir(game_dir)
     from murder_unpack.core.gzip_json import decompress_gz_json, save_json
     from murder_unpack.extract.dialogue_extractor import extract_dialogues
     from murder_unpack.extract.game_data import GameDatabase
