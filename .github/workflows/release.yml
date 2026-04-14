@@ -64,7 +64,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: gh release upload "${{ needs.create-release.outputs.tag }}" dist/* --clobber --repo "${{ github.repository }}"
 
-  publish:
+  publish-release:
     name: Publish release
     needs: [create-release, upload-release-assets]
     runs-on: ubuntu-latest
@@ -75,3 +75,20 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release edit "${{ needs.create-release.outputs.tag }}" --draft=false --repo "${{ github.repository }}"
+
+  publish-pypi:
+    name: Publish to PyPI
+    needs: [build]
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      id-token: write
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
