@@ -93,9 +93,10 @@ class SpriteExtractor:
         for name, entry in entries.items():
             sprite = self.extract_sprite(entry, atlas_id, untrim=untrim)
 
-            # Convert backslash paths to forward slash for output
-            safe_name = name.replace("\\", "/")
-            out_path = output_dir / f"{safe_name}.png"
+            # Convert backslash paths to proper path components for cross-platform
+            parts = name.replace("\\", "/").split("/")
+            parts[-1] = parts[-1] + ".png"
+            out_path = output_dir.joinpath(*parts)
             out_path.parent.mkdir(parents=True, exist_ok=True)
             sprite.save(out_path)
             count += 1

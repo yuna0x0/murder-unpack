@@ -72,6 +72,9 @@ def extract_data(game_dir: Path, output_dir: Path) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
     content_dir = game_dir / "resources" / "content"
 
+    if not content_dir.exists():
+        raise click.ClickException(f"Content directory not found: {content_dir}")
+
     for gz_file in sorted(content_dir.glob("*.gz")):
         click.echo(f"Extracting {gz_file.name}...")
         data = decompress_gz_json(gz_file)

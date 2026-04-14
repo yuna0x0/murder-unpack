@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import warnings
 from collections import defaultdict
 from pathlib import Path
 from typing import Any, Iterator
@@ -47,9 +48,11 @@ class GameDatabase:
                 self._index_asset(asset)
 
         # Load data files
+        missing = []
         for i in range(self.total_packed_data):
             data_path = content_dir / f"data{i}.gz"
             if not data_path.exists():
+                missing.append(f"data{i}.gz")
                 continue
             packed = decompress_gz_json(data_path)
             assets = packed.get("Assets", [])
@@ -58,6 +61,13 @@ class GameDatabase:
             for asset in assets:
                 self.assets.append(asset)
                 self._index_asset(asset)
+
+        if missing:
+            warnings.warn(
+                f"Missing {len(missing)}/{self.total_packed_data} data files: "
+                f"{', '.join(missing)}. Recovery may be incomplete.",
+                stacklevel=2,
+            )
 
         # Load sound data
         sounds_path = content_dir / "sounds.gz"

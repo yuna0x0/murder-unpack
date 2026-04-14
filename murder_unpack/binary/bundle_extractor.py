@@ -67,8 +67,11 @@ def _read_7bit_encoded_string(data: bytes, pos: int) -> tuple[str, int]:
         shift += 7
         if (b & 0x80) == 0:
             break
-    s = data[pos:pos + length].decode("utf-8")
-    return s, pos + length
+    end = pos + length
+    if end > len(data):
+        raise ValueError(f"String at offset {pos} extends past end of data ({end} > {len(data)})")
+    s = data[pos:end].decode("utf-8")
+    return s, end
 
 
 def parse_bundle(data: bytes) -> BundleManifest | None:
@@ -81,6 +84,8 @@ def parse_bundle(data: bytes) -> BundleManifest | None:
         return None
 
     # Read manifest header offset (8 bytes before signature)
+    if sig_pos < 8:
+        return None
     manifest_offset = struct.unpack_from("<Q", data, sig_pos - 8)[0]
     if manifest_offset == 0 or manifest_offset >= len(data):
         return None
