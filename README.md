@@ -188,6 +188,10 @@ cd murder-unpack
 uv sync
 ```
 
+## AI Disclosure
+
+AI was used to assist in the creation of some of this tool's base code.
+
 ## License
 
 [MIT](LICENSE) - yuna0x0
