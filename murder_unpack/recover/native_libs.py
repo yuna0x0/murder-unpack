@@ -144,14 +144,7 @@ def _generate_launch_script(project_dir: Path) -> None:
     On ARM64 Windows, uses the x64 dotnet or runs the x64 exe directly.
     On x64 Windows, uses regular dotnet run.
     """
-    # Detect game name from src/ directory
-    src_dir = project_dir / "src"
-    game_name = "RecoveredGame"
-    if src_dir.exists():
-        for d in src_dir.iterdir():
-            if d.is_dir() and d.name.endswith(".Editor"):
-                game_name = d.name.removesuffix(".Editor")
-                break
+    game_name = _detect_game_name(project_dir)
 
     script_path = project_dir / "run-editor.cmd"
     content = f"""\

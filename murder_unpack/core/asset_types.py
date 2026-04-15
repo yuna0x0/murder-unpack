@@ -50,9 +50,17 @@ _TYPE_MAP: dict[str, tuple[str, str]] = {
 }
 
 
+def strip_assembly_qualifier(type_name: str) -> str:
+    """Strip assembly qualifier from a .NET type name.
+
+    e.g. "Murder.Assets.PrefabAsset, Murder" -> "Murder.Assets.PrefabAsset"
+    """
+    return type_name.split(",")[0].strip() if "," in type_name else type_name
+
+
 def is_game_profile_type(type_name: str) -> bool:
     """Check if a type is a GameProfile (engine or game-specific subclass)."""
-    bare = type_name.split(",")[0].strip() if "," in type_name else type_name
+    bare = strip_assembly_qualifier(type_name)
     return bare == "Murder.Assets.GameProfile" or bare.endswith("GameProfile")
 
 
@@ -61,10 +69,7 @@ def get_asset_directory(asset: dict[str, Any]) -> str:
 
     Returns a path like "assets/data/Fonts" or "assets/ecs/World".
     """
-    type_name = asset.get("$type", "")
-
-    # Strip assembly qualifier if present (e.g. "Murder.Assets.PrefabAsset, Murder" → "Murder.Assets.PrefabAsset")
-    bare_type = type_name.split(",")[0].strip() if "," in type_name else type_name
+    bare_type = strip_assembly_qualifier(asset.get("$type", ""))
 
     # GameProfile subclasses (game-specific) — stored at root
     if is_game_profile_type(bare_type):
@@ -100,7 +105,7 @@ def get_asset_filename(asset: dict[str, Any]) -> str:
 
 def get_save_location(type_name: str) -> str:
     """Get the SaveLocation base for a type (data/ or ecs/)."""
-    bare = type_name.split(",")[0].strip() if "," in type_name else type_name
+    bare = strip_assembly_qualifier(type_name)
     if bare in _TYPE_MAP:
         base, _ = _TYPE_MAP[bare]
         return base

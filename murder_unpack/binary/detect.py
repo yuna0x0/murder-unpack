@@ -10,6 +10,8 @@ from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 
+from murder_unpack.binary.bundle_extractor import BUNDLE_SIGNATURE
+
 
 class ExeFormat(Enum):
     PE = "PE"          # Windows .exe
@@ -46,14 +48,6 @@ class BinaryInfo:
     bundle_offset: int | None = None
     bundle_file_count: int | None = None
 
-
-# .NET single-file bundle signature: SHA-256 of ".net core bundle"
-BUNDLE_SIGNATURE = bytes([
-    0x8b, 0x12, 0x02, 0xb9, 0x6a, 0x61, 0x20, 0x38,
-    0x72, 0x7b, 0x93, 0x02, 0x14, 0xd7, 0xa0, 0x32,
-    0x13, 0xf5, 0xb9, 0xe6, 0xef, 0xae, 0x33, 0x18,
-    0xee, 0x3b, 0x2d, 0xce, 0x24, 0xb3, 0x6a, 0xae,
-])
 
 NATIVEAOT_MARKERS = [b"NativeAOT compilation", b"RhpNewFast", b"DotNetRuntimeDebugHeader"]
 
