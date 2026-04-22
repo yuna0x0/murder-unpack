@@ -192,6 +192,11 @@ def decompile_with_helper(
             stderr=subprocess.PIPE,
             text=True,
         )
+        
+        stderr_thread = threading.Thread(
+            target=_stream_output, args=(proc.stderr, "helper"), daemon=True,
+        )
+        stderr_thread.start()
 
         succeeded = 0
         failed = 0
@@ -227,7 +232,7 @@ def decompile_with_helper(
 
         proc.stdout.close()
         returncode = proc.wait(timeout=total_timeout)
-        proc.stderr.close()
+        stderr_thread.join(timeout=5)
 
         if returncode == 0:
             cs_files = list(output_dir.rglob("*.cs"))
