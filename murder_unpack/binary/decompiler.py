@@ -192,7 +192,7 @@ def decompile_with_helper(
             stderr=subprocess.PIPE,
             text=True,
         )
-        
+
         stderr_thread = threading.Thread(
             target=_stream_output, args=(proc.stderr, "helper"), daemon=True,
         )
@@ -268,7 +268,7 @@ def _stream_output(pipe: TextIOWrapper, prefix: str) -> None:
     for line in iter(pipe.readline, ""):
         line = line.rstrip()
         if line:
-            click.echo(f"  [ilspycmd] {line}", err=True)
+            click.echo(f"  [{prefix}] {line}", err=True)
     pipe.close()
 
 
@@ -315,10 +315,10 @@ def decompile_assembly(
 
         # Stream stdout and stderr in background threads so user sees progress
         stdout_thread = threading.Thread(
-            target=_stream_output, args=(proc.stdout, "stdout"), daemon=True,
+            target=_stream_output, args=(proc.stdout, "ilspycmd"), daemon=True,
         )
         stderr_thread = threading.Thread(
-            target=_stream_output, args=(proc.stderr, "stderr"), daemon=True,
+            target=_stream_output, args=(proc.stderr, "ilspycmd"), daemon=True,
         )
         stdout_thread.start()
         stderr_thread.start()
